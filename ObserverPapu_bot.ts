@@ -4,9 +4,6 @@ import { registerSocialMediaCommands } from "./src/bot/commands/social-media-com
 import { isSocialMediaUrl, extractUrls } from "./src/utils/url-utils";
 import { botConfig } from "./config/bot.config";
 
-//Store bot screaming status
-let screaming = false;
-
 // Cache for bot owner ID
 let cachedOwnerId: number | null = null;
 
@@ -365,31 +362,7 @@ bot.command("groupinfo", async (ctx) => {
 
 
 
-//This function handles the /scream command
-if (botConfig.options.enableScreamMode) {
-  bot.command("scream", async (ctx) => {
-    const isAuthorized = await isUserAuthorized(ctx);
-    if (!isAuthorized) {
-      return;
-    }
-    screaming = true;
-    await ctx.reply("🔊 Modo grito activado", {
-      disable_notification: botConfig.options.silentReplies,
-    });
-  });
 
-  //This function handles /whisper command
-  bot.command("whisper", async (ctx) => {
-    const isAuthorized = await isUserAuthorized(ctx);
-    if (!isAuthorized) {
-      return;
-    }
-    screaming = false;
-    await ctx.reply("🔇 Modo grito desactivado", {
-      disable_notification: botConfig.options.silentReplies,
-    });
-  });
-}
 
 //Pre-assign menu text
 const firstMenu = "<b>Menu 1</b>\n\nA beautiful menu with a shiny inline button.";
@@ -499,15 +472,7 @@ bot.on("message", async (ctx) => {
     return;
   }
 
-  // Solo responder si está en modo scream y el mensaje tiene texto
-  if (screaming && ctx.message.text) {
-    //Scream the message
-    await ctx.reply(ctx.message.text.toUpperCase(), {
-      entities: ctx.message.entities,
-      disable_notification: botConfig.options.silentReplies, // Silent reply
-    });
-  }
-  // Si no es un comando, no es una URL de redes sociales, y no está en modo scream,
+  // Si no es un comando o una URL de redes sociales,
   // simplemente no hacer nada (no responder al mensaje)
 });
 
