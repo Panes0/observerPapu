@@ -69,9 +69,27 @@ export class SocialMediaHandler {
     } catch (error) {
       console.error('Error processing social media URL:', error);
       
-      // Actualizar mensaje de procesamiento con error
+      // Determine specific error message based on error type
+      let errorMessage: string;
       const platform = this.detectPlatformFromUrl(url);
-      const errorMessage = formatErrorMessage(platform, 'Error al obtener el contenido');
+      
+      if (error instanceof Error) {
+        if (error.message.includes('All Instagram APIs failed')) {
+          errorMessage = formatErrorMessage(platform, 'No se pudo obtener el contenido de Instagram. Los servicios pueden estar temporalmente no disponibles.');
+        } else if (error.message.includes('Access forbidden') || error.message.includes('403')) {
+          errorMessage = formatErrorMessage(platform, 'Acceso denegado. El servicio puede estar bloqueando las solicitudes.');
+        } else if (error.message.includes('Rate limited') || error.message.includes('429')) {
+          errorMessage = formatErrorMessage(platform, 'Demasiadas solicitudes. Intenta de nuevo en unos minutos.');
+        } else if (error.message.includes('HTTP error')) {
+          errorMessage = formatErrorMessage(platform, 'Error de conexión con el servicio.');
+        } else {
+          errorMessage = formatErrorMessage(platform, 'Error al obtener el contenido. Intenta de nuevo más tarde.');
+        }
+      } else {
+        errorMessage = formatErrorMessage(platform, 'Error inesperado al procesar el contenido.');
+      }
+      
+      // Actualizar mensaje de procesamiento con error
       await ctx.api.editMessageText(ctx.chat!.id, processingMessage.message_id, errorMessage, { parse_mode: 'HTML' });
     }
   }

@@ -1,7 +1,7 @@
 import { Bot, InlineKeyboard, Context } from "grammy";
 import { SocialMediaHandler } from "./src/bot/handlers/social-media-handler";
 import { registerSocialMediaCommands } from "./src/bot/commands/social-media-commands";
-import { isSocialMediaUrl } from "./src/utils/url-utils";
+import { isSocialMediaUrl, extractUrls } from "./src/utils/url-utils";
 import { botConfig } from "./config/bot.config";
 
 //Store bot screaming status
@@ -112,6 +112,59 @@ async function isUserAuthorized(ctx: Context): Promise<boolean> {
   }
 
   return true;
+}
+
+// Helper function to check if social media links should be processed even for unauthorized users
+async function shouldProcessSocialMediaLinks(ctx: Context): Promise<boolean> {
+  // If whitelist is disabled, always process
+  if (!botConfig.options.enableWhitelist) {
+    return true;
+  }
+
+  const userId = ctx.from?.id;
+  if (!userId) {
+    return false;
+  }
+
+  // For private chats, use normal authorization
+  if (ctx.chat?.type === 'private') {
+    return await isUserAuthorized(ctx);
+  }
+
+  // For group chats, check if user is whitelisted
+  const whitelistedUsers = botConfig.options.whitelistedUsers || [];
+  const isWhitelisted = whitelistedUsers.includes(userId);
+  
+  // If user is whitelisted, allow processing
+  if (isWhitelisted) {
+    return true;
+  }
+
+  // If user is not whitelisted, check if owner is present in group
+  if (ctx.chat && (ctx.chat.type === 'group' || ctx.chat.type === 'supergroup')) {
+    try {
+      let ownerId = await getBotOwnerId(bot);
+      if (!ownerId) {
+        ownerId = botConfig.options.ownerId;
+      }
+      
+      if (!ownerId) {
+        return false; // No owner configured
+      }
+      
+      const chatMember = await ctx.api.getChatMember(ctx.chat.id, ownerId);
+      const ownerPresent = chatMember.status !== 'left' && chatMember.status !== 'kicked';
+      
+      if (ownerPresent) {
+        console.log(`🔗 Procesando link de usuario no autorizado (${ctx.from?.first_name}) - Owner presente en grupo`);
+        return true;
+      }
+    } catch (error) {
+      console.log('⚠️ Error verificando presencia del owner para procesamiento de links:', error);
+    }
+  }
+
+  return false;
 }
 
 // Create a new bot using configuration
@@ -243,6 +296,73 @@ bot.command("botinfo", async (ctx) => {
   }
 });
 
+// Comando para mostrar información del grupo y verificar presencia del owner
+bot.command("groupinfo", async (ctx) => {
+  const isAuthorized = await isUserAuthorized(ctx);
+  if (!isAuthorized) {
+    return;
+  }
+  
+  try {
+    const chat = ctx.chat;
+    if (!chat) {
+      await ctx.reply("❌ No se pudo obtener información del chat");
+      return;
+    }
+    
+    let infoMessage = `📋 <b>Información del Grupo</b>\n\n`;
+    infoMessage += `📝 <b>Nombre:</b> ${chat.title || 'Chat privado'}\n`;
+    infoMessage += `🆔 <b>Chat ID:</b> ${chat.id}\n`;
+    infoMessage += `💬 <b>Tipo:</b> ${chat.type}\n`;
+    
+    if (chat.username) {
+      infoMessage += `🔗 <b>Username:</b> @${chat.username}\n`;
+    }
+    
+    // Verificar presencia del owner
+    const ownerId = await getBotOwnerId(bot) || botConfig.options.ownerId;
+    if (ownerId && (chat.type === 'group' || chat.type === 'supergroup')) {
+      try {
+        const chatMember = await ctx.api.getChatMember(chat.id, ownerId);
+        const ownerStatus = chatMember.status;
+        const ownerPresent = ownerStatus !== 'left' && ownerStatus !== 'kicked';
+        
+        infoMessage += `\n👑 <b>Owner (${ownerId}):</b> ${ownerPresent ? '✅ Presente' : '❌ No presente'}\n`;
+        infoMessage += `📊 <b>Estado:</b> ${ownerStatus}\n`;
+        
+        if (ownerPresent) {
+          infoMessage += `\n💡 <b>Links de redes sociales:</b> Se procesarán incluso de usuarios no autorizados`;
+        } else {
+          infoMessage += `\n⚠️ <b>Links de redes sociales:</b> Solo usuarios autorizados`;
+        }
+             } catch (error) {
+         const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
+         infoMessage += `\n❌ <b>Error verificando owner:</b> ${errorMessage}`;
+       }
+    } else if (!ownerId) {
+      infoMessage += `\n⚠️ <b>Owner:</b> No configurado`;
+    }
+    
+    // Información del usuario actual
+    const currentUser = ctx.from;
+    if (currentUser) {
+      const whitelistedUsers = botConfig.options.whitelistedUsers || [];
+      const isWhitelisted = whitelistedUsers.includes(currentUser.id);
+      
+      infoMessage += `\n\n👤 <b>Usuario actual:</b> ${currentUser.first_name}\n`;
+      infoMessage += `🆔 <b>ID:</b> ${currentUser.id}\n`;
+      infoMessage += `🔐 <b>Autorizado:</b> ${isWhitelisted ? '✅ Sí' : '❌ No'}`;
+    }
+    
+    await ctx.reply(infoMessage, {
+      parse_mode: "HTML",
+      disable_notification: botConfig.options.silentReplies,
+    });
+  } catch (error) {
+    await ctx.reply("❌ Error obteniendo información del grupo");
+  }
+});
+
 
 
 //This function handles the /scream command
@@ -334,14 +454,7 @@ bot.callbackQuery(nextButton, async (ctx) => {
 bot.on("message", async (ctx) => {
   // Check if user is authorized to use the bot
   const isAuthorized = await isUserAuthorized(ctx);
-  if (!isAuthorized) {
-    // Silent rejection - don't respond to unauthorized users
-    if (botConfig.options.logMessages) {
-      console.log(`🚫 Usuario no autorizado: ${ctx.from?.first_name} (${ctx.from?.id})`);
-    }
-    return;
-  }
-
+  
   //Print to console if logging is enabled
   if (botConfig.options.logMessages) {
     console.log(
@@ -352,15 +465,38 @@ bot.on("message", async (ctx) => {
   }
 
   // Verificar si el mensaje contiene URLs de redes sociales
-  if (ctx.message.text && isSocialMediaUrl(ctx.message.text)) {
-    try {
-      console.log("🔍 URL de redes sociales detectada, procesando...");
-      await SocialMediaHandler.handleMessage(ctx);
-      return; // No procesar más si se manejó como URL de redes sociales
-    } catch (error) {
-      console.error('❌ Error handling social media message:', error);
-      // Continuar con el procesamiento normal si falla
+  if (ctx.message.text) {
+    const urls = extractUrls(ctx.message.text);
+    const socialMediaUrls = urls.filter((url: string) => isSocialMediaUrl(url));
+    
+    if (socialMediaUrls.length > 0) {
+      // Use special authorization for social media links
+      const shouldProcess = await shouldProcessSocialMediaLinks(ctx);
+      if (!shouldProcess) {
+        if (botConfig.options.logMessages) {
+          console.log(`🚫 Link de redes sociales rechazado: ${ctx.from?.first_name} (${ctx.from?.id})`);
+        }
+        return;
+      }
+      
+      try {
+        console.log("🔍 URL de redes sociales detectada, procesando...");
+        await SocialMediaHandler.handleMessage(ctx);
+        return; // No procesar más si se manejó como URL de redes sociales
+      } catch (error) {
+        console.error('❌ Error handling social media message:', error);
+        // Continuar con el procesamiento normal si falla
+      }
     }
+  }
+
+  // For non-social media messages, use normal authorization
+  if (!isAuthorized) {
+    // Silent rejection - don't respond to unauthorized users
+    if (botConfig.options.logMessages) {
+      console.log(`🚫 Usuario no autorizado: ${ctx.from?.first_name} (${ctx.from?.id})`);
+    }
+    return;
   }
 
   // Solo responder si está en modo scream y el mensaje tiene texto
