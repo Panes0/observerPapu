@@ -24,6 +24,10 @@ Bot de Telegram que procesa automáticamente contenido de redes sociales usando 
 - `/whisper` - Desactiva modo scream
 - `/menu` - Muestra menú interactivo
 
+### Comandos de Administración
+- `/setowner` - Configura automáticamente el owner del bot (solo en chats privados)
+- `/botinfo` - Muestra información del bot y configuración de seguridad
+
 ### Comandos de Redes Sociales
 - `/fix` - Obtiene URLs fijas para contenido de redes sociales
 - `/help_social` - Muestra ayuda sobre funcionalidades de redes sociales
@@ -214,14 +218,20 @@ export const botConfig = {
     // Control de acceso
     enableWhitelist: true,              // Activar sistema de whitelist
     requireOwnerInGroup: true,          // Requiere owner en grupo
-    ownerId: 123456789,                 // Tu ID de usuario de Telegram
-    whitelistedUsers: [123456789],      // IDs de usuarios autorizados
+    ownerId: null,                      // Se configura automáticamente con /setowner
+    whitelistedUsers: [],               // Se llena automáticamente
   }
 };
 ```
 
-#### Cómo Obtener tu ID de Usuario
+#### Configuración Automática del Owner
 
+**Opción 1: Automática (Recomendada)**
+1. Habla con tu bot en privado
+2. Envía el comando `/setowner`
+3. El bot automáticamente configurará tu ID como owner y te agregará a la whitelist
+
+**Opción 2: Manual**
 1. Habla con [@userinfobot](https://t.me/userinfobot) en Telegram
 2. Copia tu ID numérico
 3. Agrégalo como `ownerId` en la configuración
@@ -235,6 +245,11 @@ export const botConfig = {
 
 #### Agregar Usuarios a la Whitelist
 
+**Automático (Recomendado):**
+- El comando `/setowner` agrega automáticamente al owner a la whitelist
+- Los usuarios se pueden agregar manualmente editando la configuración
+
+**Manual:**
 ```typescript
 whitelistedUsers: [
   123456789,  // Owner ID
@@ -244,12 +259,26 @@ whitelistedUsers: [
 ]
 ```
 
+#### Comandos de Administración
+
+**`/setowner`** - Configura automáticamente el owner del bot
+- Solo funciona en chats privados con el bot
+- Configura automáticamente tu ID como owner
+- Te agrega automáticamente a la whitelist
+- Uso: Envía `/setowner` en privado al bot
+
+**`/botinfo`** - Muestra información del bot y configuración
+- Requiere estar autorizado (en whitelist)
+- Muestra información del bot, owner y configuración de seguridad
+- Útil para verificar que todo esté configurado correctamente
+
 #### Comportamiento de Seguridad
 
 - **Rechazo silencioso**: El bot ignora mensajes de usuarios no autorizados
 - **Logs de seguridad**: Registra intentos de acceso no autorizados
 - **Verificación en tiempo real**: Comprueba permisos en cada mensaje
 - **Protección de comandos**: Todos los comandos requieren autorización
+- **Configuración automática**: El owner se puede configurar automáticamente
 
 ## 🧪 Testing
 
