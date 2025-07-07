@@ -4,10 +4,7 @@ Bot de Telegram que procesa automáticamente contenido de redes sociales usando 
 
 ## 🚀 Funcionalidades
 
-### ✅ Funcionalidades Originales (Mantenidas)
-- Comando `/scream` - Convierte mensajes a mayúsculas
-- Comando `/whisper` - Desactiva el modo scream
-- Comando `/menu` - Menú interactivo con botones
+### ✅ Funcionalidades Básicas
 - Forwarding automático de mensajes
 
 ### 🆕 Nuevas Funcionalidades de Redes Sociales
@@ -19,10 +16,7 @@ Bot de Telegram que procesa automáticamente contenido de redes sociales usando 
 
 ## 📱 Comandos Disponibles
 
-### Comandos Originales
-- `/scream` - Activa modo scream (mensajes en mayúsculas)
-- `/whisper` - Desactiva modo scream
-- `/menu` - Muestra menú interactivo
+
 
 ### Comandos de Administración
 - `/setowner` - Configura automáticamente el owner del bot (solo en chats privados)
@@ -159,8 +153,6 @@ papuPanes_bot.ts (Bot principal)
      token: "TU_TOKEN_REAL_AQUI",
      options: {
        enableSocialMedia: true,    // Habilitar funcionalidades de redes sociales
-       enableScreamMode: true,     // Habilitar comandos /scream y /whisper
-       enableMenu: true,           // Habilitar comando /menu
        silentReplies: true,        // Usar notificaciones silenciosas
        logMessages: true,          // Loggear mensajes en consola
      }
@@ -195,8 +187,6 @@ twitter: {
 | Opción | Descripción | Valor por defecto |
 |--------|-------------|-------------------|
 | `enableSocialMedia` | Habilita procesamiento de URLs de redes sociales | `true` |
-| `enableScreamMode` | Habilita comandos `/scream` y `/whisper` | `true` |
-| `enableMenu` | Habilita comando `/menu` | `true` |
 | `silentReplies` | Usa notificaciones silenciosas para respuestas | `true` |
 | `logMessages` | Loggea mensajes entrantes en consola | `true` |
 | `enableWhitelist` | Habilita sistema de whitelist de usuarios | `true` |

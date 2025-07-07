@@ -1,4 +1,4 @@
-import { Bot, InlineKeyboard, Context } from "grammy";
+import { Bot, Context } from "grammy";
 import { SocialMediaHandler } from "./src/bot/handlers/social-media-handler";
 import { registerSocialMediaCommands } from "./src/bot/commands/social-media-commands";
 import { isSocialMediaUrl, extractUrls } from "./src/utils/url-utils";
@@ -370,63 +370,10 @@ bot.command("groupinfo", async (ctx) => {
 
 
 
-//Pre-assign menu text
-const firstMenu = "<b>Menu 1</b>\n\nA beautiful menu with a shiny inline button.";
-const secondMenu = "<b>Menu 2</b>\n\nA better menu with even more shiny inline buttons.";
-
-//Pre-assign button text
-const nextButton = "Next";
-const backButton = "Back";
-const tutorialButton = "Tutorial";
-
-//Build keyboards
-const firstMenuMarkup = new InlineKeyboard().text(nextButton, nextButton);
- 
-const secondMenuMarkup = new InlineKeyboard().text(backButton, backButton).text(tutorialButton, "https://core.telegram.org/bots/tutorial");
 
 
-//This handler sends a menu with the inline buttons we pre-assigned above
-if (botConfig.options.enableMenu) {
-  bot.command("menu", async (ctx) => {
-    const isAuthorized = await isUserAuthorized(ctx);
-    if (!isAuthorized) {
-      return;
-    }
-    await ctx.reply(firstMenu, {
-      parse_mode: "HTML",
-      reply_markup: firstMenuMarkup,
-      disable_notification: botConfig.options.silentReplies, // Silent reply
-    });
-  });
-}
 
-//This handler processes back button on the menu
-bot.callbackQuery(backButton, async (ctx) => {
-  const isAuthorized = await isUserAuthorized(ctx);
-  if (!isAuthorized) {
-    await ctx.answerCallbackQuery("No autorizado");
-    return;
-  }
-  //Update message content with corresponding menu section
-  await ctx.editMessageText(firstMenu, {
-    reply_markup: firstMenuMarkup,
-    parse_mode: "HTML",
-   });
- });
 
-//This handler processes next button on the menu
-bot.callbackQuery(nextButton, async (ctx) => {
-  const isAuthorized = await isUserAuthorized(ctx);
-  if (!isAuthorized) {
-    await ctx.answerCallbackQuery("No autorizado");
-    return;
-  }
-  //Update message content with corresponding menu section
-  await ctx.editMessageText(secondMenu, {
-    reply_markup: secondMenuMarkup,
-    parse_mode: "HTML",
-   });
- });
 
 
 //This function would be added to the dispatcher as a handler for messages coming from the Bot API

@@ -10,8 +10,6 @@ export const botConfig: BotConfig = {
   options: {
     // Enable or disable bot features
     enableSocialMedia: true,
-    enableScreamMode: true,
-    enableMenu: true,
     
     // Bot behavior settings
     silentReplies: true, // Use disable_notification for replies
