@@ -95,62 +95,16 @@ bot.on("message", async (ctx) => {
     }
   }
 
+  // Solo responder si está en modo scream y el mensaje tiene texto
   if (screaming && ctx.message.text) {
     //Scream the message
     await ctx.reply(ctx.message.text.toUpperCase(), {
       entities: ctx.message.entities,
       disable_notification: botConfig.options.silentReplies, // Silent reply
     });
-  } else {
-    //This is equivalent to forwarding, without the sender's name
-    try {
-      await ctx.copyMessage(ctx.message.chat.id, { disable_notification: botConfig.options.silentReplies });
-    } catch (error) {
-      console.error('Error copying message:', error);
-      
-      // Fallback: try to send the message content in a different way
-      if (ctx.message.text) {
-        await ctx.reply(ctx.message.text, {
-          entities: ctx.message.entities,
-          disable_notification: botConfig.options.silentReplies, // Silent reply
-        });
-      } else if (ctx.message.photo) {
-        // Handle photos
-        const photo = ctx.message.photo[ctx.message.photo.length - 1]; // Get the largest photo
-        await ctx.replyWithPhoto(photo.file_id, {
-          caption: ctx.message.caption,
-          caption_entities: ctx.message.caption_entities,
-          disable_notification: botConfig.options.silentReplies, // Silent reply
-        });
-      } else if (ctx.message.video) {
-        // Handle videos
-        await ctx.replyWithVideo(ctx.message.video.file_id, {
-          caption: ctx.message.caption,
-          caption_entities: ctx.message.caption_entities,
-          disable_notification: botConfig.options.silentReplies, // Silent reply
-        });
-      } else if (ctx.message.audio) {
-        // Handle audio
-        await ctx.replyWithAudio(ctx.message.audio.file_id, {
-          caption: ctx.message.caption,
-          caption_entities: ctx.message.caption_entities,
-          disable_notification: botConfig.options.silentReplies, // Silent reply
-        });
-      } else if (ctx.message.document) {
-        // Handle documents
-        await ctx.replyWithDocument(ctx.message.document.file_id, {
-          caption: ctx.message.caption,
-          caption_entities: ctx.message.caption_entities,
-          disable_notification: botConfig.options.silentReplies, // Silent reply
-        });
-      } else {
-        // Generic fallback
-        await ctx.reply('No se pudo procesar este tipo de mensaje.', {
-          disable_notification: botConfig.options.silentReplies, // Silent reply
-        });
-      }
-    }
   }
+  // Si no es un comando, no es una URL de redes sociales, y no está en modo scream,
+  // simplemente no hacer nada (no responder al mensaje)
 });
 
 // Global error handler
