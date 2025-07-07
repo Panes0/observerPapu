@@ -79,11 +79,13 @@ async function isUserAuthorized(ctx: Context): Promise<boolean> {
   // For group chats, check whitelist first
   const whitelistedUsers = botConfig.options.whitelistedUsers || [];
   const isWhitelisted = whitelistedUsers.includes(userId);
-  if (!isWhitelisted) {
-    return false;
+  
+  // If user is whitelisted, allow immediately
+  if (isWhitelisted) {
+    return true;
   }
 
-  // If owner presence is required and this is a group chat
+  // If user is not whitelisted, check if owner is present in group (if required)
   if (botConfig.options.requireOwnerInGroup && ctx.chat && (ctx.chat.type === 'group' || ctx.chat.type === 'supergroup')) {
     try {
       // Try to get owner ID automatically first
@@ -100,15 +102,19 @@ async function isUserAuthorized(ctx: Context): Promise<boolean> {
       }
       
       const chatMember = await ctx.api.getChatMember(ctx.chat.id, ownerId);
-      // Check if owner is in the group and not banned
-      return chatMember.status !== 'left' && chatMember.status !== 'kicked';
+      const ownerPresent = chatMember.status !== 'left' && chatMember.status !== 'kicked';
+      
+      if (ownerPresent) {
+        console.log(`✅ Usuario no autorizado permitido (${ctx.from?.first_name}) - Owner presente en grupo`);
+        return true;
+      }
     } catch (error) {
       console.log('⚠️ No se pudo verificar la presencia del owner en el grupo:', error);
       return false;
     }
   }
 
-  return true;
+  return false;
 }
 
 // Helper function to check if social media links should be processed even for unauthorized users
