@@ -57,7 +57,29 @@ async function isUserAuthorized(ctx: Context): Promise<boolean> {
     return false;
   }
 
-  // Check if user is in whitelist
+  // Special handling for private chats
+  if (ctx.chat?.type === 'private') {
+    // In private chats, allow if:
+    // 1. User is in whitelist, OR
+    // 2. No owner is configured yet (first-time setup)
+    const whitelistedUsers = botConfig.options.whitelistedUsers || [];
+    const isWhitelisted = whitelistedUsers.includes(userId);
+    const hasOwner = botConfig.options.ownerId || cachedOwnerId;
+    
+    if (isWhitelisted) {
+      return true; // User is authorized
+    }
+    
+    if (!hasOwner) {
+      // No owner configured yet - allow for initial setup
+      console.log(`🔧 Configuración inicial: permitiendo acceso a ${ctx.from?.first_name} (${userId})`);
+      return true;
+    }
+    
+    return false; // User not in whitelist and owner is configured
+  }
+
+  // For group chats, check whitelist first
   const whitelistedUsers = botConfig.options.whitelistedUsers || [];
   const isWhitelisted = whitelistedUsers.includes(userId);
   if (!isWhitelisted) {
@@ -65,7 +87,7 @@ async function isUserAuthorized(ctx: Context): Promise<boolean> {
   }
 
   // If owner presence is required and this is a group chat
-  if (botConfig.options.requireOwnerInGroup && ctx.chat && ctx.chat.type !== 'private') {
+  if (botConfig.options.requireOwnerInGroup && ctx.chat && (ctx.chat.type === 'group' || ctx.chat.type === 'supergroup')) {
     try {
       // Try to get owner ID automatically first
       let ownerId = await getBotOwnerId(bot);
@@ -108,13 +130,17 @@ bot.command("setowner", async (ctx) => {
     return;
   }
   
-  // Solo permitir si whitelist está deshabilitada o si el usuario está en la whitelist
-  if (botConfig.options.enableWhitelist) {
-    const whitelistedUsers = botConfig.options.whitelistedUsers || [];
-    if (!whitelistedUsers.includes(userId)) {
-      await ctx.reply("❌ No tienes permisos para configurar el owner");
-      return;
-    }
+  // Solo permitir en chats privados
+  if (ctx.chat?.type !== 'private') {
+    await ctx.reply("❌ Este comando solo funciona en chats privados con el bot");
+    return;
+  }
+  
+  // Check if user is authorized (allows first-time setup)
+  const isAuthorized = await isUserAuthorized(ctx);
+  if (!isAuthorized) {
+    await ctx.reply("❌ No tienes permisos para configurar el owner");
+    return;
   }
   
   // Set the owner ID
@@ -132,6 +158,51 @@ bot.command("setowner", async (ctx) => {
   });
   
   console.log(`👑 Owner configurado: ${userId} (${ctx.from?.first_name})`);
+});
+
+// Comando para verificar el estado de autorización del usuario
+bot.command("auth", async (ctx) => {
+  const userId = ctx.from?.id;
+  const chatType = ctx.chat?.type;
+  
+  if (!userId) {
+    await ctx.reply("❌ No se pudo obtener tu ID de usuario");
+    return;
+  }
+  
+  const whitelistedUsers = botConfig.options.whitelistedUsers || [];
+  const isWhitelisted = whitelistedUsers.includes(userId);
+  const hasOwner = botConfig.options.ownerId || cachedOwnerId;
+  
+  let statusMessage = `🔐 <b>Estado de Autorización</b>\n\n`;
+  statusMessage += `👤 <b>Usuario:</b> ${ctx.from?.first_name}\n`;
+  statusMessage += `🆔 <b>ID:</b> ${userId}\n`;
+  statusMessage += `💬 <b>Chat:</b> ${chatType}\n`;
+  statusMessage += `🔐 <b>Whitelist:</b> ${isWhitelisted ? '✅ Autorizado' : '❌ No autorizado'}\n`;
+  statusMessage += `👑 <b>Owner configurado:</b> ${hasOwner ? '✅ Sí' : '❌ No'}\n`;
+  
+  if (chatType === 'private') {
+    if (!hasOwner) {
+      statusMessage += `\n💡 <b>Configuración inicial:</b> Puedes usar /setowner para configurar el owner`;
+    } else if (!isWhitelisted) {
+      statusMessage += `\n❌ <b>Acceso denegado:</b> No estás en la whitelist`;
+    } else {
+      statusMessage += `\n✅ <b>Acceso permitido:</b> Estás autorizado`;
+    }
+  } else {
+    if (!isWhitelisted) {
+      statusMessage += `\n❌ <b>Acceso denegado:</b> No estás en la whitelist`;
+    } else if (botConfig.options.requireOwnerInGroup) {
+      statusMessage += `\n👥 <b>Verificación de grupo:</b> Se requiere que el owner esté presente`;
+    } else {
+      statusMessage += `\n✅ <b>Acceso permitido:</b> Estás autorizado`;
+    }
+  }
+  
+  await ctx.reply(statusMessage, {
+    parse_mode: "HTML",
+    disable_notification: botConfig.options.silentReplies,
+  });
 });
 
 // Comando para mostrar información del bot y owner

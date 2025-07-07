@@ -27,6 +27,7 @@ Bot de Telegram que procesa automáticamente contenido de redes sociales usando 
 ### Comandos de Administración
 - `/setowner` - Configura automáticamente el owner del bot (solo en chats privados)
 - `/botinfo` - Muestra información del bot y configuración de seguridad
+- `/auth` - Verifica tu estado de autorización y permisos
 
 ### Comandos de Redes Sociales
 - `/fix` - Obtiene URLs fijas para contenido de redes sociales
@@ -241,7 +242,18 @@ export const botConfig = {
 - **Whitelist deshabilitada**: El bot responde a todos los usuarios
 - **Whitelist habilitada**: Solo responde a usuarios en `whitelistedUsers`
 - **Owner en grupo**: Si `requireOwnerInGroup` es `true`, el owner debe estar en el grupo para que el bot funcione
-- **Chats privados**: El bot siempre funciona en chats privados con usuarios autorizados
+
+#### Comportamiento en Chats Privados
+
+- **Configuración inicial**: Si no hay owner configurado, cualquier usuario puede usar `/setowner` para configurarse como owner
+- **Después de configuración**: Solo usuarios en la whitelist pueden usar el bot
+- **Comando `/setowner`**: Solo funciona en chats privados y requiere autorización (permite configuración inicial)
+
+#### Comportamiento en Grupos
+
+- **Verificación estricta**: Usuario debe estar en whitelist
+- **Presencia del owner**: Si está habilitado, el owner debe estar en el grupo
+- **Rechazo silencioso**: Usuarios no autorizados son ignorados completamente
 
 #### Agregar Usuarios a la Whitelist
 
@@ -265,12 +277,19 @@ whitelistedUsers: [
 - Solo funciona en chats privados con el bot
 - Configura automáticamente tu ID como owner
 - Te agrega automáticamente a la whitelist
+- Permite configuración inicial (cuando no hay owner configurado)
 - Uso: Envía `/setowner` en privado al bot
 
 **`/botinfo`** - Muestra información del bot y configuración
 - Requiere estar autorizado (en whitelist)
 - Muestra información del bot, owner y configuración de seguridad
 - Útil para verificar que todo esté configurado correctamente
+
+**`/auth`** - Verifica tu estado de autorización
+- Funciona para cualquier usuario
+- Muestra tu ID, estado de whitelist y permisos
+- Útil para diagnosticar problemas de acceso
+- Uso: Envía `/auth` para ver tu estado
 
 #### Comportamiento de Seguridad
 

@@ -22,7 +22,7 @@ export const socialMediaConfig: SocialMediaConfig = {
   },
   general: {
     autoDeleteOriginalMessage: true, // Enable/disable auto-delete
-    deleteDelay: 3000 // Delete after 3 seconds
+    deleteDelay: 2000 // Delete after 2 seconds
   }
 };
 
