@@ -4,8 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "ts-node ./papuPanes_bot.ts",
-    "dev": "ts-node-dev ./papuPanes_bot.ts",
+    "start": "ts-node ./ObserverPapu_bot.ts",
+    "dev": "ts-node-dev ./ObserverPapu_bot.ts",
     "test": "ts-node ./test-social-media.ts",
     "test:bot": "echo \"Error: no test specified\" && exit 1"
   },
