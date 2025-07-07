@@ -1,26 +1,41 @@
 import { SocialMediaPost, MediaItem } from '../types/social-media';
+import { botConfig } from '../../config/bot.config';
 
 /**
  * Formatea un post de redes sociales para Telegram
  */
 export function formatPostForTelegram(post: SocialMediaPost): string {
-  const platformEmoji = getPlatformEmoji(post.platform);
-  const author = post.author;
-  const content = post.content || '';
-  const stats = formatStats(post);
+  const displayOptions = botConfig.options.socialMediaDisplay;
+  let message = '';
   
-  let message = `${platformEmoji} <b>${post.platform.toUpperCase()}</b>\n`;
-  message += `👤 <b>Autor:</b> ${author}\n`;
-  
-  if (content) {
-    message += `\n📝 <b>Contenido:</b>\n${content}\n`;
+  // Mostrar plataforma si está habilitado
+  if (displayOptions.showPlatform) {
+    const platformEmoji = getPlatformEmoji(post.platform);
+    message += `${platformEmoji} <b>${post.platform.toUpperCase()}</b>\n`;
   }
   
-  if (stats) {
-    message += `\n${stats}\n`;
+  // Mostrar autor si está habilitado
+  if (displayOptions.showAuthor) {
+    message += `👤 <b>Autor:</b> ${post.author}\n`;
   }
   
-  message += `\n🔗 <a href="${post.url}">Ver original</a>`;
+  // Mostrar contenido si está habilitado
+  if (displayOptions.showContent && post.content) {
+    message += `\n📝 <b>Contenido:</b>\n${post.content}\n`;
+  }
+  
+  // Mostrar estadísticas si están habilitadas
+  if (displayOptions.showStats) {
+    const stats = formatStats(post);
+    if (stats) {
+      message += `\n${stats}\n`;
+    }
+  }
+  
+  // Mostrar enlace original si está habilitado
+  if (displayOptions.showOriginalLink) {
+    message += `\n🔗 <a href="${post.url}">Ver original</a>`;
+  }
   
   return message;
 }

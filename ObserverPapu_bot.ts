@@ -243,6 +243,8 @@ bot.command("botinfo", async (ctx) => {
   }
 });
 
+
+
 //This function handles the /scream command
 if (botConfig.options.enableScreamMode) {
   bot.command("scream", async (ctx) => {

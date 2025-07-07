@@ -22,5 +22,14 @@ export const botConfig: BotConfig = {
     requireOwnerInGroup: true, // Require owner to be in the group for bot to respond
     ownerId: null, // Will be set automatically with /setowner command, or replace with your Telegram user ID
     whitelistedUsers: [], // Array of user IDs allowed to use the bot (will be populated automatically)
+    
+    // Social media display options
+    socialMediaDisplay: {
+      showPlatform: true,      // Show platform name (Twitter, Instagram, etc.)
+      showAuthor: true,        // Show author name
+      showContent: true,       // Show post content/text
+      showStats: true,         // Show likes, retweets, comments
+      showOriginalLink: true,  // Show "Ver original" link
+    },
   }
 }; 
