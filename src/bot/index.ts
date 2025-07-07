@@ -2,9 +2,10 @@ import { Bot } from "grammy";
 import { SocialMediaHandler } from "./handlers/social-media-handler";
 import { registerSocialMediaCommands } from "./commands/social-media-commands";
 import { isSocialMediaUrl } from "../utils/url-utils";
+import { botConfig } from "../../config/bot.config";
 
 // Create a new bot
-const bot = new Bot("7674393790:AAGq6faK2NBLibdUhIOVXiPhr4z1vfguI1s");
+const bot = new Bot(botConfig.token);
 
 // Registrar comandos de redes sociales
 registerSocialMediaCommands(bot);
