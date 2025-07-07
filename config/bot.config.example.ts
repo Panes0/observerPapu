@@ -15,5 +15,11 @@ export const botConfig = {
     // Bot behavior settings
     silentReplies: true, // Use disable_notification for replies
     logMessages: true,   // Log incoming messages to console
+    
+    // Access control settings
+    enableWhitelist: true, // Enable whitelist verification
+    requireOwnerInGroup: true, // Require owner to be in the group for bot to respond
+    ownerId: 123456789, // Replace with your Telegram user ID
+    whitelistedUsers: [123456789], // Array of user IDs allowed to use the bot
   }
 }; 

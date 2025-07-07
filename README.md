@@ -194,6 +194,62 @@ twitter: {
 | `enableMenu` | Habilita comando `/menu` | `true` |
 | `silentReplies` | Usa notificaciones silenciosas para respuestas | `true` |
 | `logMessages` | Loggea mensajes entrantes en consola | `true` |
+| `enableWhitelist` | Habilita sistema de whitelist de usuarios | `true` |
+| `requireOwnerInGroup` | Requiere que el owner esté en el grupo para que el bot responda | `true` |
+| `ownerId` | ID del usuario owner del bot | `123456789` |
+| `whitelistedUsers` | Array de IDs de usuarios autorizados | `[123456789]` |
+
+### 🛡️ Control de Acceso (Whitelist)
+
+El bot incluye un sistema de whitelist que permite controlar quién puede usar el bot:
+
+#### Configuración de Whitelist
+
+```typescript
+export const botConfig = {
+  token: "TU_TOKEN_REAL_AQUI",
+  options: {
+    // ... otras opciones
+    
+    // Control de acceso
+    enableWhitelist: true,              // Activar sistema de whitelist
+    requireOwnerInGroup: true,          // Requiere owner en grupo
+    ownerId: 123456789,                 // Tu ID de usuario de Telegram
+    whitelistedUsers: [123456789],      // IDs de usuarios autorizados
+  }
+};
+```
+
+#### Cómo Obtener tu ID de Usuario
+
+1. Habla con [@userinfobot](https://t.me/userinfobot) en Telegram
+2. Copia tu ID numérico
+3. Agrégalo como `ownerId` en la configuración
+
+#### Funcionamiento del Sistema
+
+- **Whitelist deshabilitada**: El bot responde a todos los usuarios
+- **Whitelist habilitada**: Solo responde a usuarios en `whitelistedUsers`
+- **Owner en grupo**: Si `requireOwnerInGroup` es `true`, el owner debe estar en el grupo para que el bot funcione
+- **Chats privados**: El bot siempre funciona en chats privados con usuarios autorizados
+
+#### Agregar Usuarios a la Whitelist
+
+```typescript
+whitelistedUsers: [
+  123456789,  // Owner ID
+  987654321,  // Usuario autorizado 1
+  456789123,  // Usuario autorizado 2
+  // ... más usuarios
+]
+```
+
+#### Comportamiento de Seguridad
+
+- **Rechazo silencioso**: El bot ignora mensajes de usuarios no autorizados
+- **Logs de seguridad**: Registra intentos de acceso no autorizados
+- **Verificación en tiempo real**: Comprueba permisos en cada mensaje
+- **Protección de comandos**: Todos los comandos requieren autorización
 
 ## 🧪 Testing
 
