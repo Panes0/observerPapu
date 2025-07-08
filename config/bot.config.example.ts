@@ -39,6 +39,7 @@ export const botConfig: BotConfig = {
       maxTokens: 250, // Maximum tokens per response (optimizado para respuestas cortas)
       temperature: 0.912, // Response creativity (0.0 to 2.0)
       systemPrompt: "Eres un asistente helpful que responde de forma MUY breve y concisa. Tus respuestas deben ser de 1-3 oraciones máximo. Simplifica conceptos complejos y ve directo al punto. Responde en español argentino, podés utiizar insultos, chistes, etc. No seas muy formal.", // System prompt personalizable
+      showWaterConsumption: true, // Show water consumption estimate (mL) instead of tokens
     },
   }
 }; 

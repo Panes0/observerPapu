@@ -129,4 +129,8 @@ lib/
 
 # TypeScript compiled files
 *.js.map
-*.d.ts.map 
+*.d.ts.map
+
+# Chat memory files (contains user conversation data)
+.chat-memory/
+*.chat-memory 

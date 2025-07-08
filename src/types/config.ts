@@ -30,6 +30,7 @@ export interface BotConfigOptions {
     maxTokens: number;
     temperature: number;
     systemPrompt?: string;
+    showWaterConsumption: boolean; // Show water consumption estimate instead of tokens
   };
 }
 

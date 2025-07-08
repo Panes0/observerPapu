@@ -32,6 +32,7 @@ export function configureAIService(config: Partial<AIServiceConfig>): void {
 export * from '../../types/ai';
 
 /**
- * Exportar servicio
+ * Exportar servicios
  */
-export { TogetherAIService }; 
+export { TogetherAIService } from './together-ai-service';
+export { ChatMemoryService, memoryService } from './memory-service'; 

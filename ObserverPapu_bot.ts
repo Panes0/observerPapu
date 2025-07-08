@@ -5,8 +5,23 @@ import { isSocialMediaUrl, extractUrls } from "./src/utils/url-utils";
 import { botConfig } from "./config/bot.config";
 import { imageSearchService } from "./src/services/image-search";
 import { formatImageResult, formatImageError, formatNoImagesFound, getImageSearchHelp } from "./src/utils/image-utils";
-import { aiService, configureAIService } from "./src/services/ai";
-import { formatAIResult, formatAIError, formatAINotConfigured, getAIHelp, validatePrompt, sanitizePrompt } from "./src/utils/ai-utils";
+import { aiService, configureAIService, memoryService } from "./src/services/ai";
+import { 
+  formatAIResult, 
+  formatAIError, 
+  formatAINotConfigured, 
+  getAIHelp, 
+  validatePrompt, 
+  sanitizePrompt,
+  // Nuevas utilidades para memoria
+  shouldUseMemory,
+  getMemoryId,
+  getMemoryType,
+  formatAIResultWithMemory,
+  createPromptWithContext,
+  formatMemoryStats,
+  getMemoryHelp
+} from "./src/utils/ai-utils";
 
 // Cache for bot owner ID
 let cachedOwnerId: number | null = null;
@@ -574,7 +589,7 @@ bot.command("imgx", async (ctx) => {
   }
 });
 
-// Comando para usar IA con Together AI
+// Comando para usar IA con Together AI (ahora con memoria)
 bot.command("ia", async (ctx) => {
   const isAuthorized = await isUserAuthorized(ctx);
   if (!isAuthorized) {
@@ -627,12 +642,46 @@ bot.command("ia", async (ctx) => {
       disable_notification: botConfig.options.silentReplies,
     });
 
-    // Limpiar y procesar el prompt
-    const sanitizedPrompt = sanitizePrompt(prompt);
+    // === LÓGICA DE MEMORIA ===
+    const chatId = ctx.chat?.id;
+    const chatType = ctx.chat?.type;
+    const userId = ctx.from?.id;
+    const username = ctx.from?.username;
     
-    // Generar respuesta de IA
+    let hasMemoryContext = false;
+    let finalPrompt = sanitizePrompt(prompt);
+    
+    // Verificar si usar memoria (grupos y chats privados)
+    if (chatId && chatType && userId && shouldUseMemory(chatId, chatType, userId)) {
+      const memoryId = getMemoryId(chatId, chatType, userId);
+      const memoryType = getMemoryType(chatType);
+      
+      if (memoryId && memoryType) {
+        try {
+          // Obtener contexto de memoria
+          const memoryContext = await memoryService.getMemoryContext(memoryId, memoryType);
+          
+          if (memoryContext) {
+            finalPrompt = createPromptWithContext(finalPrompt, memoryContext);
+            hasMemoryContext = true;
+            const contextDesc = memoryType === 'group' ? 'grupo' : 'usuario';
+            console.log(`🧠 Usando memoria para ${contextDesc} ${memoryId}: ${memoryContext.split('\n').length - 2} entradas`);
+          }
+          
+          // Agregar entrada actual a memoria (async, no esperamos)
+          memoryService.addEntry(memoryId, memoryType, prompt, userId, username).catch(error => {
+            console.error('Error agregando entrada a memoria:', error);
+          });
+        } catch (error) {
+          console.error('Error procesando memoria:', error);
+          // Continuar sin memoria en caso de error
+        }
+      }
+    }
+    
+    // Generar respuesta de IA (con o sin contexto de memoria)
     const aiResponse = await aiService.generateResponse({
-      prompt: sanitizedPrompt,
+      prompt: finalPrompt,
     });
 
     // Eliminar mensaje de carga
@@ -642,8 +691,13 @@ bot.command("ia", async (ctx) => {
       console.log('No se pudo eliminar el mensaje de carga:', error);
     }
 
-    // Formatear y enviar respuesta
-    const formattedResult = formatAIResult(aiResponse, prompt);
+    // Formatear y enviar respuesta (con indicador de memoria si aplica)
+    const formattedResult = formatAIResultWithMemory(
+      aiResponse, 
+      prompt, 
+      hasMemoryContext,
+      botConfig.options.ai.showWaterConsumption
+    );
     
     await ctx.reply(formattedResult.message, {
       parse_mode: "HTML",
@@ -652,7 +706,8 @@ bot.command("ia", async (ctx) => {
 
     // Log de la consulta
     if (botConfig.options.logMessages) {
-      console.log(`🤖 IA consultada por ${ctx.from?.first_name} (${ctx.from?.id}) - Tokens: ${formattedResult.tokensUsed}`);
+      const memoryIndicator = hasMemoryContext ? ' (con memoria)' : '';
+      console.log(`🤖 IA consultada por ${ctx.from?.first_name} (${ctx.from?.id}) - Tokens: ${formattedResult.tokensUsed}${memoryIndicator}`);
     }
 
   } catch (error) {
@@ -668,6 +723,133 @@ bot.command("ia", async (ctx) => {
       disable_notification: botConfig.options.silentReplies,
     });
   }
+});
+
+// ========================================
+// COMANDOS DE MEMORIA
+// ========================================
+
+// Comando para ver estadísticas de memoria
+bot.command("memory_stats", async (ctx) => {
+  const isAuthorized = await isUserAuthorized(ctx);
+  if (!isAuthorized) {
+    return;
+  }
+  
+  const chatId = ctx.chat?.id;
+  const chatType = ctx.chat?.type;
+  const userId = ctx.from?.id;
+  
+  if (!chatId || !chatType || !userId) {
+    await ctx.reply("❌ No se pudo obtener información del chat o usuario", {
+      disable_notification: botConfig.options.silentReplies,
+    });
+    return;
+  }
+  
+  if (!shouldUseMemory(chatId, chatType, userId)) {
+    await ctx.reply("💡 La memoria no está disponible para este tipo de chat", {
+      disable_notification: botConfig.options.silentReplies,
+    });
+    return;
+  }
+  
+  try {
+    const memoryId = getMemoryId(chatId, chatType, userId);
+    const memoryType = getMemoryType(chatType);
+    
+    if (!memoryId || !memoryType) {
+      await ctx.reply("❌ No se pudo obtener identificador de memoria", {
+        disable_notification: botConfig.options.silentReplies,
+      });
+      return;
+    }
+    
+    const stats = await memoryService.getMemoryStats(memoryId, memoryType);
+    const formattedStats = formatMemoryStats(stats, chatType);
+    
+    await ctx.reply(formattedStats, {
+      parse_mode: "HTML",
+      disable_notification: botConfig.options.silentReplies,
+    });
+    
+  } catch (error) {
+    console.error('Error obteniendo estadísticas de memoria:', error);
+    await ctx.reply("❌ Error obteniendo estadísticas de memoria", {
+      disable_notification: botConfig.options.silentReplies,
+    });
+  }
+});
+
+// Comando para limpiar memoria
+bot.command("memory_clear", async (ctx) => {
+  const isAuthorized = await isUserAuthorized(ctx);
+  if (!isAuthorized) {
+    return;
+  }
+  
+  const chatId = ctx.chat?.id;
+  const chatType = ctx.chat?.type;
+  const userId = ctx.from?.id;
+  
+  if (!chatId || !chatType || !userId) {
+    await ctx.reply("❌ No se pudo obtener información del chat o usuario", {
+      disable_notification: botConfig.options.silentReplies,
+    });
+    return;
+  }
+  
+  if (!shouldUseMemory(chatId, chatType, userId)) {
+    await ctx.reply("💡 La memoria no está disponible para este tipo de chat", {
+      disable_notification: botConfig.options.silentReplies,
+    });
+    return;
+  }
+  
+  try {
+    const memoryId = getMemoryId(chatId, chatType, userId);
+    const memoryType = getMemoryType(chatType);
+    
+    if (!memoryId || !memoryType) {
+      await ctx.reply("❌ No se pudo obtener identificador de memoria", {
+        disable_notification: botConfig.options.silentReplies,
+      });
+      return;
+    }
+    
+    await memoryService.clearMemory(memoryId, memoryType);
+    
+    const context = memoryType === 'group' ? 'del grupo' : 'personal';
+    await ctx.reply(`🗑️ <b>Memoria ${context} limpiada</b>\n\nTodas las conversaciones anteriores han sido eliminadas.`, {
+      parse_mode: "HTML",
+      disable_notification: botConfig.options.silentReplies,
+    });
+    
+    if (botConfig.options.logMessages) {
+      const contextDesc = memoryType === 'group' ? 'grupo' : 'usuario';
+      console.log(`🗑️ Memoria limpiada para ${contextDesc} ${memoryId} por ${ctx.from?.first_name} (${ctx.from?.id})`);
+    }
+    
+  } catch (error) {
+    console.error('Error limpiando memoria:', error);
+    await ctx.reply("❌ Error limpiando memoria", {
+      disable_notification: botConfig.options.silentReplies,
+    });
+  }
+});
+
+// Comando para mostrar ayuda sobre memoria
+bot.command("memory_help", async (ctx) => {
+  const isAuthorized = await isUserAuthorized(ctx);
+  if (!isAuthorized) {
+    return;
+  }
+  
+  const helpMessage = getMemoryHelp();
+  await ctx.reply(helpMessage, {
+    parse_mode: "HTML",
+    disable_notification: botConfig.options.silentReplies,
+  });
 });
 
 //This function would be added to the dispatcher as a handler for messages coming from the Bot API
