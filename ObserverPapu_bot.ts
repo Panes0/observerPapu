@@ -3,6 +3,10 @@ import { SocialMediaHandler } from "./src/bot/handlers/social-media-handler";
 import { registerSocialMediaCommands } from "./src/bot/commands/social-media-commands";
 import { isSocialMediaUrl, extractUrls } from "./src/utils/url-utils";
 import { botConfig } from "./config/bot.config";
+import { imageSearchService } from "./src/services/image-search";
+import { formatImageResult, formatImageError, formatNoImagesFound, getImageSearchHelp } from "./src/utils/image-utils";
+import { aiService, configureAIService } from "./src/services/ai";
+import { formatAIResult, formatAIError, formatAINotConfigured, getAIHelp, validatePrompt, sanitizePrompt } from "./src/utils/ai-utils";
 
 // Cache for bot owner ID
 let cachedOwnerId: number | null = null;
@@ -172,6 +176,11 @@ async function shouldProcessSocialMediaLinks(ctx: Context): Promise<boolean> {
 
 // Create a new bot using configuration
 const bot = new Bot(botConfig.token);
+
+// Configurar el servicio de IA si está habilitado
+if (botConfig.options.enableAI) {
+  configureAIService(botConfig.options.ai);
+}
 
 // Registrar comandos de redes sociales si está habilitado
 if (botConfig.options.enableSocialMedia) {
@@ -366,15 +375,300 @@ bot.command("groupinfo", async (ctx) => {
   }
 });
 
+// Comando para buscar imágenes
+bot.command("img", async (ctx) => {
+  const isAuthorized = await isUserAuthorized(ctx);
+  if (!isAuthorized) {
+    return;
+  }
+  
+  try {
+    const args = ctx.message?.text?.split(' ').slice(1);
+    
+    if (!args || args.length === 0) {
+      const helpMessage = getImageSearchHelp();
+      await ctx.reply(helpMessage, {
+        parse_mode: "HTML",
+        disable_notification: botConfig.options.silentReplies,
+      });
+      return;
+    }
 
+    const query = args.join(' ').trim();
+    
+    if (query.length < 2) {
+      await ctx.reply("❌ La búsqueda debe tener al menos 2 caracteres", {
+        disable_notification: botConfig.options.silentReplies,
+      });
+      return;
+    }
 
+    if (query.length > 100) {
+      await ctx.reply("❌ La búsqueda es demasiado larga (máximo 100 caracteres)", {
+        disable_notification: botConfig.options.silentReplies,
+      });
+      return;
+    }
 
+    // Mostrar mensaje de carga
+    const loadingMessage = await ctx.reply("🔍 Buscando imágenes...", {
+      disable_notification: botConfig.options.silentReplies,
+    });
 
+    // Buscar imagen aleatoria
+    const imageResult = await imageSearchService.getRandomImage(query, {
+      maxResults: 50,
+      safeSearch: 'moderate'
+    });
 
+    // Eliminar mensaje de carga
+    try {
+      await ctx.api.deleteMessage(ctx.chat.id, loadingMessage.message_id);
+    } catch (error) {
+      console.log('No se pudo eliminar el mensaje de carga:', error);
+    }
 
+    if (!imageResult) {
+      const noResultsMessage = formatNoImagesFound(query);
+      await ctx.reply(noResultsMessage.message, {
+        parse_mode: "HTML",
+        disable_notification: botConfig.options.silentReplies,
+      });
+      return;
+    }
 
+    // Formatear el resultado
+    const formattedResult = formatImageResult(imageResult, query);
+    
+    // Enviar un solo mensaje con toda la información y la URL para que Telegram muestre el preview
+    await ctx.reply(formattedResult.message, {
+      parse_mode: "HTML",
+      disable_notification: botConfig.options.silentReplies,
+    });
 
+    // Log de la búsqueda
+    if (botConfig.options.logMessages) {
+      console.log(`🖼️ Imagen encontrada para "${query}" por ${ctx.from?.first_name} (${ctx.from?.id})`);
+    }
 
+  } catch (error) {
+    console.error('Error en comando /img:', error);
+    
+    const args = ctx.message?.text?.split(' ').slice(1);
+    const query = args?.join(' ').trim() || 'búsqueda';
+    const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
+    
+    const formattedError = formatImageError(query, errorMessage);
+    await ctx.reply(formattedError.message, {
+      parse_mode: "HTML",
+      disable_notification: botConfig.options.silentReplies,
+    });
+  }
+});
+
+// Comando para buscar imágenes sin filtro de seguridad
+bot.command("imgx", async (ctx) => {
+  const isAuthorized = await isUserAuthorized(ctx);
+  if (!isAuthorized) {
+    return;
+  }
+  
+  try {
+    const args = ctx.message?.text?.split(' ').slice(1);
+    
+    if (!args || args.length === 0) {
+      const helpMessage = `🖼️ <b>Comando /imgx - Búsqueda de Imágenes Sin Filtro</b>\n\n` +
+                         `<b>Uso:</b>\n` +
+                         `<code>/imgx [término de búsqueda]</code>\n\n` +
+                         `<b>⚠️ ADVERTENCIA:</b>\n` +
+                         `Este comando busca imágenes <b>SIN filtro de seguridad</b>.\n` +
+                         `Los resultados pueden contener contenido adulto o explícito.\n\n` +
+                         `<b>Ejemplos:</b>\n` +
+                         `• <code>/imgx arte</code>\n` +
+                         `• <code>/imgx fotografía</code>\n` +
+                         `• <code>/imgx naturaleza</code>\n\n` +
+                         `<b>Diferencias con /img:</b>\n` +
+                         `• <code>/img</code> - SafeSearch habilitado (contenido filtrado)\n` +
+                         `• <code>/imgx</code> - SafeSearch deshabilitado (sin filtros)\n\n` +
+                         `<b>Nota:</b> Usa este comando con responsabilidad.`;
+      
+      await ctx.reply(helpMessage, {
+        parse_mode: "HTML",
+        disable_notification: botConfig.options.silentReplies,
+      });
+      return;
+    }
+
+    const query = args.join(' ').trim();
+    
+    if (query.length < 2) {
+      await ctx.reply("❌ La búsqueda debe tener al menos 2 caracteres", {
+        disable_notification: botConfig.options.silentReplies,
+      });
+      return;
+    }
+
+    if (query.length > 100) {
+      await ctx.reply("❌ La búsqueda es demasiado larga (máximo 100 caracteres)", {
+        disable_notification: botConfig.options.silentReplies,
+      });
+      return;
+    }
+
+    // Mostrar mensaje de carga con advertencia
+    const loadingMessage = await ctx.reply("🔍 Buscando imágenes sin filtro...", {
+      disable_notification: botConfig.options.silentReplies,
+    });
+
+    // Buscar imagen aleatoria SIN SafeSearch
+    const imageResult = await imageSearchService.getRandomImage(query, {
+      maxResults: 50,
+      safeSearch: 'off'  // ⚠️ SafeSearch desactivado
+    });
+
+    // Eliminar mensaje de carga
+    try {
+      await ctx.api.deleteMessage(ctx.chat.id, loadingMessage.message_id);
+    } catch (error) {
+      console.log('No se pudo eliminar el mensaje de carga:', error);
+    }
+
+    if (!imageResult) {
+      const noResultsMessage = formatNoImagesFound(query);
+      await ctx.reply(noResultsMessage.message, {
+        parse_mode: "HTML",
+        disable_notification: botConfig.options.silentReplies,
+      });
+      return;
+    }
+
+    // Formatear el resultado (usa la misma función que /img)
+    const formattedResult = formatImageResult(imageResult, query);
+    
+    // Agregar advertencia al mensaje
+    const warningMessage = `⚠️` + formattedResult.message;
+    
+    // Enviar un solo mensaje con toda la información y la URL para que Telegram muestre el preview
+    await ctx.reply(warningMessage, {
+      parse_mode: "HTML",
+      disable_notification: botConfig.options.silentReplies,
+    });
+
+    // Log de la búsqueda
+    if (botConfig.options.logMessages) {
+      console.log(`🖼️ Imagen SIN FILTRO encontrada para "${query}" por ${ctx.from?.first_name} (${ctx.from?.id})`);
+    }
+
+  } catch (error) {
+    console.error('Error en comando /imgx:', error);
+    
+    const args = ctx.message?.text?.split(' ').slice(1);
+    const query = args?.join(' ').trim() || 'búsqueda';
+    const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
+    
+    const formattedError = formatImageError(query, errorMessage);
+    await ctx.reply(formattedError.message, {
+      parse_mode: "HTML",
+      disable_notification: botConfig.options.silentReplies,
+    });
+  }
+});
+
+// Comando para usar IA con Together AI
+bot.command("ia", async (ctx) => {
+  const isAuthorized = await isUserAuthorized(ctx);
+  if (!isAuthorized) {
+    return;
+  }
+  
+  // Verificar si el servicio de IA está habilitado
+  if (!botConfig.options.enableAI) {
+    await ctx.reply("❌ El servicio de IA está deshabilitado", {
+      disable_notification: botConfig.options.silentReplies,
+    });
+    return;
+  }
+  
+  try {
+    const args = ctx.message?.text?.split(' ').slice(1);
+    
+    if (!args || args.length === 0) {
+      const helpMessage = getAIHelp();
+      await ctx.reply(helpMessage, {
+        parse_mode: "HTML",
+        disable_notification: botConfig.options.silentReplies,
+      });
+      return;
+    }
+
+    const prompt = args.join(' ').trim();
+    
+    // Validar el prompt
+    const validation = validatePrompt(prompt);
+    if (!validation.valid) {
+      await ctx.reply(`❌ ${validation.error}`, {
+        disable_notification: botConfig.options.silentReplies,
+      });
+      return;
+    }
+
+    // Verificar si el servicio está configurado
+    if (!aiService.isConfigured()) {
+      const notConfiguredMessage = formatAINotConfigured();
+      await ctx.reply(notConfiguredMessage.message, {
+        parse_mode: "HTML",
+        disable_notification: botConfig.options.silentReplies,
+      });
+      return;
+    }
+
+    // Mostrar mensaje de carga
+    const loadingMessage = await ctx.reply("🤖 Generando respuesta...", {
+      disable_notification: botConfig.options.silentReplies,
+    });
+
+    // Limpiar y procesar el prompt
+    const sanitizedPrompt = sanitizePrompt(prompt);
+    
+    // Generar respuesta de IA
+    const aiResponse = await aiService.generateResponse({
+      prompt: sanitizedPrompt,
+    });
+
+    // Eliminar mensaje de carga
+    try {
+      await ctx.api.deleteMessage(ctx.chat.id, loadingMessage.message_id);
+    } catch (error) {
+      console.log('No se pudo eliminar el mensaje de carga:', error);
+    }
+
+    // Formatear y enviar respuesta
+    const formattedResult = formatAIResult(aiResponse, prompt);
+    
+    await ctx.reply(formattedResult.message, {
+      parse_mode: "HTML",
+      disable_notification: botConfig.options.silentReplies,
+    });
+
+    // Log de la consulta
+    if (botConfig.options.logMessages) {
+      console.log(`🤖 IA consultada por ${ctx.from?.first_name} (${ctx.from?.id}) - Tokens: ${formattedResult.tokensUsed}`);
+    }
+
+  } catch (error) {
+    console.error('Error en comando /ia:', error);
+    
+    const args = ctx.message?.text?.split(' ').slice(1);
+    const prompt = args?.join(' ').trim() || 'consulta';
+    const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
+    
+    const formattedError = formatAIError(prompt, errorMessage);
+    await ctx.reply(formattedError.message, {
+      parse_mode: "HTML",
+      disable_notification: botConfig.options.silentReplies,
+    });
+  }
+});
 
 //This function would be added to the dispatcher as a handler for messages coming from the Bot API
 bot.on("message", async (ctx) => {

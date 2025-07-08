@@ -1,6 +1,7 @@
 export interface BotConfigOptions {
   // Enable or disable bot features
   enableSocialMedia: boolean;
+  enableAI: boolean;
   
   // Bot behavior settings
   silentReplies: boolean;
@@ -19,6 +20,15 @@ export interface BotConfigOptions {
     showContent: boolean;       // Show post content/text
     showStats: boolean;         // Show likes, retweets, comments
     showOriginalLink: boolean;  // Show "Ver original" link
+  };
+  
+  // AI configuration
+  ai: {
+    apiKey: string;
+    baseUrl: string;
+    defaultModel: string;
+    maxTokens: number;
+    temperature: number;
   };
 }
 

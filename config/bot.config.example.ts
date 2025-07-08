@@ -10,6 +10,7 @@ export const botConfig: BotConfig = {
   options: {
     // Enable or disable bot features
     enableSocialMedia: true,
+    enableAI: true, // Enable AI functionality with Together AI
     
     // Bot behavior settings
     silentReplies: true, // Use disable_notification for replies
@@ -28,6 +29,15 @@ export const botConfig: BotConfig = {
       showContent: true,       // Show post content/text
       showStats: true,         // Show likes, retweets, comments
       showOriginalLink: true,  // Show "Ver original" link
+    },
+    
+    // AI configuration (Together AI)
+    ai: {
+      apiKey: "YOUR_TOGETHER_AI_API_KEY", // Get your API key from https://together.ai/
+      baseUrl: "https://api.together.xyz", // Together AI API base URL
+      defaultModel: "meta-llama/Llama-2-7b-chat-hf", // Default model to use
+      maxTokens: 150, // Maximum tokens per response (optimizado para respuestas cortas)
+      temperature: 0.7, // Response creativity (0.0 to 2.0)
     },
   }
 }; 
