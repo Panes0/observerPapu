@@ -28,6 +28,7 @@ export interface AIServiceConfig {
   defaultModel: string;
   maxTokens: number;
   temperature: number;
+  systemPrompt?: string;
 }
 
 export interface AIService {

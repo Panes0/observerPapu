@@ -63,7 +63,7 @@ export class TogetherAIService implements AIService {
         messages: [
           {
             role: 'system',
-            content: 'Eres un asistente helpful que responde de forma MUY breve y concisa. Tus respuestas deben ser de 1-2 oraciones máximo. Simplifica conceptos complejos y ve directo al punto. Responde en español y de manera amigable pero eficiente.'
+            content: this.config.systemPrompt || 'Eres un asistente helpful que responde de forma breve y concisa. Tus respuestas deben ser de 1-2 oraciones máximo. Ve directo al punto.'
           },
           {
             role: 'user',

@@ -29,6 +29,7 @@ export interface BotConfigOptions {
     defaultModel: string;
     maxTokens: number;
     temperature: number;
+    systemPrompt?: string;
   };
 }
 
