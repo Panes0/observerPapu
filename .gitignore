@@ -135,5 +135,9 @@ lib/
 .chat-memory/
 *.chat-memory 
 
+# Video cache files (contains processed video message references)
+.video-cache/
+*.video-cache
+
 # Temporary download directory
 temp_downloads/

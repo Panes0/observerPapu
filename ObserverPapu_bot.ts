@@ -868,6 +868,129 @@ bot.command("memory_help", async (ctx) => {
   });
 });
 
+// Comando para mostrar estadísticas del caché de videos
+bot.command("video_cache_stats", async (ctx) => {
+  const isAuthorized = await isUserAuthorized(ctx);
+  if (!isAuthorized) {
+    return;
+  }
+  
+  try {
+    const { videoCacheService } = await import("./src/services/video-cache");
+    const stats = videoCacheService.getStats();
+    
+    let message = `📦 <b>Estadísticas del Caché de Videos</b>\n\n`;
+    message += `📊 <b>General:</b>\n`;
+    message += `• <b>Videos cacheados:</b> ${stats.totalEntries}\n`;
+    message += `• <b>Cache hits:</b> ${stats.cacheHits}\n`;
+    message += `• <b>Cache misses:</b> ${stats.cacheMisses}\n`;
+    message += `• <b>Ratio de aciertos:</b> ${(stats.hitRatio * 100).toFixed(1)}%\n`;
+    message += `• <b>Tamaño total:</b> ${stats.totalSize > 0 ? (stats.totalSize / (1024 * 1024)).toFixed(1) + ' MB' : 'N/A'}\n\n`;
+    
+    if (Object.keys(stats.platformStats).length > 0) {
+      message += `🎥 <b>Por plataforma:</b>\n`;
+      Object.entries(stats.platformStats)
+        .sort(([,a], [,b]) => b - a)
+        .slice(0, 10)
+        .forEach(([platform, count]) => {
+          message += `• ${platform}: ${count}\n`;
+        });
+      message += `\n`;
+    }
+    
+    if (stats.oldestEntry > 0) {
+      const oldestDate = new Date(stats.oldestEntry);
+      const newestDate = new Date(stats.newestEntry);
+      message += `📅 <b>Fechas:</b>\n`;
+      message += `• <b>Más antiguo:</b> ${oldestDate.toLocaleDateString()}\n`;
+      message += `• <b>Más reciente:</b> ${newestDate.toLocaleDateString()}\n`;
+    }
+    
+    await ctx.reply(message, {
+      parse_mode: "HTML",
+      disable_notification: botConfig.options.silentReplies,
+    });
+    
+  } catch (error) {
+    console.error('Error obteniendo estadísticas del caché:', error);
+    await ctx.reply("❌ Error obteniendo estadísticas del caché", {
+      disable_notification: botConfig.options.silentReplies,
+    });
+  }
+});
+
+// Comando para limpiar el caché de videos
+bot.command("video_cache_clear", async (ctx) => {
+  const isAuthorized = await isUserAuthorized(ctx);
+  if (!isAuthorized) {
+    return;
+  }
+  
+  try {
+    const { videoCacheService } = await import("./src/services/video-cache");
+    
+    // Solo el owner puede limpiar completamente el caché
+    const userId = ctx.from?.id;
+    const isOwner = userId === botConfig.options.ownerId;
+    
+    if (!isOwner) {
+      await ctx.reply("❌ Solo el owner puede limpiar el caché completamente", {
+        disable_notification: botConfig.options.silentReplies,
+      });
+      return;
+    }
+    
+    const statsBefore = videoCacheService.getStats();
+    videoCacheService.clearCache();
+    
+    await ctx.reply(`🗑️ <b>Caché de videos limpiado</b>\n\nSe eliminaron ${statsBefore.totalEntries} entradas del caché.`, {
+      parse_mode: "HTML",
+      disable_notification: botConfig.options.silentReplies,
+    });
+    
+  } catch (error) {
+    console.error('Error limpiando caché:', error);
+    await ctx.reply("❌ Error limpiando caché", {
+      disable_notification: botConfig.options.silentReplies,
+    });
+  }
+});
+
+// Comando para limpiar entradas antiguas del caché
+bot.command("video_cache_cleanup", async (ctx) => {
+  const isAuthorized = await isUserAuthorized(ctx);
+  if (!isAuthorized) {
+    return;
+  }
+  
+  try {
+    const { videoCacheService } = await import("./src/services/video-cache");
+    
+    // Limpiar entradas más antiguas que 30 días
+    const removedCount = await videoCacheService.cleanup({
+      olderThanDays: 30,
+      maxEntries: 500
+    }, bot.api);
+    
+    if (removedCount > 0) {
+      await ctx.reply(`🧹 <b>Limpieza completada</b>\n\nSe eliminaron ${removedCount} entradas antiguas del caché.`, {
+        parse_mode: "HTML",
+        disable_notification: botConfig.options.silentReplies,
+      });
+    } else {
+      await ctx.reply("✅ No se encontraron entradas antiguas para eliminar", {
+        disable_notification: botConfig.options.silentReplies,
+      });
+    }
+    
+  } catch (error) {
+    console.error('Error en limpieza del caché:', error);
+    await ctx.reply("❌ Error en limpieza del caché", {
+      disable_notification: botConfig.options.silentReplies,
+    });
+  }
+});
+
 // Comando para mostrar estadísticas de sitios soportados
 bot.command("supported_sites", async (ctx) => {
   const isAuthorized = await isUserAuthorized(ctx);

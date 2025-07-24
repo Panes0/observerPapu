@@ -1,12 +1,13 @@
 import { Context, InputFile } from 'grammy';
 import { socialMediaManager } from '../../services/social-media';
-import { extractUrls, isSocialMediaUrl } from '../../utils/url-utils';
+import { extractUrls, isSocialMediaUrl, isProcessableUrl, getDomain } from '../../utils/url-utils';
 import { formatPostForTelegram, formatErrorMessage, getMainMediaType } from '../../utils/media-utils';
 import { SocialMediaPost } from '../../types/social-media';
 import { isAutoDeleteEnabled, getDeleteDelay } from '../../config/social-media-config';
 import { getDownloadService } from '../../services/download';
 import { botConfig } from '../../../config/bot.config';
 import { FileManager } from '../../services/download/file-manager';
+import { videoCacheService } from '../../services/video-cache';
 import * as fs from 'fs';
 
 export class SocialMediaHandler {
@@ -46,11 +47,50 @@ export class SocialMediaHandler {
    * Procesa una URL específica de redes sociales
    */
   static async processSocialMediaUrl(ctx: Context, url: string): Promise<void> {
+    // **PASO 1: Verificar caché de videos**
+    const cachedEntry = videoCacheService.getCachedEntry(url);
+    if (cachedEntry) {
+      try {
+        // Intentar hacer forward del mensaje cacheado (ocultando autor original)
+        const forwardedMessage = await ctx.api.forwardMessage(
+          ctx.chat!.id, 
+          cachedEntry.chatId, 
+          cachedEntry.messageId
+        );
+        
+        console.log(`💾 Video enviado desde caché: ${cachedEntry.platform} - ${url}`);
+        
+        // Eliminar nombre del autor original del forward
+        try {
+          await ctx.api.editMessageCaption(
+            ctx.chat!.id,
+            forwardedMessage.message_id,
+            {
+              caption: `🔄 <b>Contenido desde caché</b>\n\n🔗 <a href="${url}">Ver original</a>`,
+              parse_mode: 'HTML'
+            }
+          );
+        } catch (editError) {
+          // Si no se puede editar, no es crítico
+          console.log('No se pudo editar caption del mensaje forwarded');
+        }
+        
+        return; // Terminar aquí si el caché funcionó
+      } catch (forwardError) {
+        console.log(`❌ Error al forward desde caché, procesando normalmente: ${forwardError}`);
+        // Remover entrada inválida del caché
+        videoCacheService.removeEntry(url);
+      }
+    }
+
+    // **PASO 2: Procesamiento normal si no hay caché**
     // Mostrar mensaje de "procesando"
     const processingMessage = await ctx.reply('🔄 Procesando contenido...', { 
       parse_mode: 'HTML',
       disable_notification: true // Silent reply
     });
+
+    let sentMessage: any = null;
 
     try {
       // Extraer información del post
@@ -60,7 +100,28 @@ export class SocialMediaHandler {
       const formattedMessage = formatPostForTelegram(post);
       
       // Enviar contenido según el tipo de medio
-      await this.sendPostContent(ctx, post, formattedMessage);
+      sentMessage = await this.sendPostContent(ctx, post, formattedMessage);
+      
+      // **PASO 3: Guardar en caché si se envió correctamente**
+      if (sentMessage && sentMessage.message_id && ctx.chat?.id) {
+        const platform = this.detectPlatformFromUrl(url);
+        const metadata = {
+          title: post.content || post.media?.[0]?.url,
+          author: post.author,
+          duration: post.media?.[0]?.duration,
+          fileSize: undefined // No tenemos info del tamaño aún
+        };
+        
+        videoCacheService.addEntry(
+          url,
+          sentMessage.message_id,
+          ctx.chat.id,
+          platform,
+          metadata
+        );
+        
+        console.log(`💾 Video guardado en caché: ${platform} - ${url} -> mensaje ${sentMessage.message_id}`);
+      }
       
       // Eliminar mensaje de procesamiento
       await ctx.api.deleteMessage(ctx.chat!.id, processingMessage.message_id);
@@ -92,7 +153,7 @@ export class SocialMediaHandler {
           const downloadResult = await downloadService.downloadMedia(url);
           
           if (downloadResult.success && downloadResult.filePath) {
-            await this.sendDownloadedContent(ctx, downloadResult, processingMessage);
+            const sentMessage = await this.sendDownloadedContent(ctx, downloadResult, processingMessage, url);
             
             // Auto-delete original message if enabled
             if (isAutoDeleteEnabled() && ctx.message?.message_id) {
@@ -142,62 +203,67 @@ export class SocialMediaHandler {
   /**
    * Envía el contenido del post según su tipo
    */
-  private static async sendPostContent(ctx: Context, post: SocialMediaPost, message: string): Promise<void> {
+  private static async sendPostContent(ctx: Context, post: SocialMediaPost, message: string): Promise<any> {
     const mediaType = getMainMediaType(post);
     
     if (!mediaType || !post.media || post.media.length === 0) {
       // Solo texto
       try {
-        await ctx.reply(message, { 
+        const sentMessage = await ctx.reply(message, { 
           parse_mode: 'HTML',
           disable_notification: true // Silent reply
         });
+        return sentMessage;
       } catch (error) {
         console.error('Error sending text message:', error);
         // Try without HTML parsing as fallback
-        await ctx.reply(message.replace(/<[^>]*>/g, ''), {
+        const sentMessage = await ctx.reply(message.replace(/<[^>]*>/g, ''), {
           disable_notification: true // Silent reply
         });
+        return sentMessage;
       }
-      return;
     }
 
     const mainMedia = post.media[0];
 
     try {
+      let sentMessage: any;
       if (mediaType === 'image') {
-        await ctx.replyWithPhoto(mainMedia.url, {
+        sentMessage = await ctx.replyWithPhoto(mainMedia.url, {
           caption: message,
           parse_mode: 'HTML',
           disable_notification: true // Silent reply
         });
       } else if (mediaType === 'video') {
-        await ctx.replyWithVideo(mainMedia.url, {
+        sentMessage = await ctx.replyWithVideo(mainMedia.url, {
           caption: message,
           parse_mode: 'HTML',
           disable_notification: true // Silent reply
         });
       } else if (mediaType === 'gif') {
-        await ctx.replyWithAnimation(mainMedia.url, {
+        sentMessage = await ctx.replyWithAnimation(mainMedia.url, {
           caption: message,
           parse_mode: 'HTML',
           disable_notification: true // Silent reply
         });
       }
+      return sentMessage;
     } catch (error) {
       console.error('Error sending media:', error);
       // Fallback a mensaje de texto si falla el envío de medios
       try {
-        await ctx.reply(message, { 
+        const sentMessage = await ctx.reply(message, { 
           parse_mode: 'HTML',
           disable_notification: true // Silent reply
         });
+        return sentMessage;
       } catch (textError) {
         console.error('Error sending fallback text message:', textError);
         // Final fallback: send without HTML
-        await ctx.reply(message.replace(/<[^>]*>/g, ''), {
+        const sentMessage = await ctx.reply(message.replace(/<[^>]*>/g, ''), {
           disable_notification: true // Silent reply
         });
+        return sentMessage;
       }
     }
   }
@@ -206,18 +272,26 @@ export class SocialMediaHandler {
    * Detecta la plataforma desde una URL
    */
   private static detectPlatformFromUrl(url: string): string {
-    const urlObj = new URL(url);
-    const hostname = urlObj.hostname.toLowerCase();
-
-    if (hostname.includes('twitter.com') || hostname.includes('x.com')) {
-      return 'twitter';
-    } else if (hostname.includes('instagram.com')) {
-      return 'instagram';
-    } else if (hostname.includes('tiktok.com')) {
-      return 'tiktok';
-    }
-
-    return 'red social';
+    const domain = getDomain(url).toLowerCase();
+    
+    // Mapeo de dominios a plataformas
+    if (domain.includes('youtube.com') || domain.includes('youtu.be')) return 'youtube';
+    if (domain.includes('twitter.com') || domain.includes('x.com')) return 'twitter';
+    if (domain.includes('instagram.com')) return 'instagram';
+    if (domain.includes('tiktok.com')) return 'tiktok';
+    if (domain.includes('facebook.com')) return 'facebook';
+    if (domain.includes('reddit.com')) return 'reddit';
+    if (domain.includes('vimeo.com')) return 'vimeo';
+    if (domain.includes('twitch.tv')) return 'twitch';
+    if (domain.includes('kick.com')) return 'kick';
+    if (domain.includes('dailymotion.com')) return 'dailymotion';
+    if (domain.includes('soundcloud.com')) return 'soundcloud';
+    if (domain.includes('bandcamp.com')) return 'bandcamp';
+    if (domain.includes('bilibili.com')) return 'bilibili';
+    if (domain.includes('vk.com')) return 'vk';
+    
+    // Fallback al dominio principal
+    return domain.replace('www.', '').split('.')[0];
   }
 
   /**
@@ -271,9 +345,9 @@ export class SocialMediaHandler {
   }
 
   /**
-   * Envía contenido descargado usando el servicio de fallback
+   * Sends downloaded content and handles caching
    */
-  private static async sendDownloadedContent(ctx: Context, downloadResult: any, processingMessage: any): Promise<void> {
+  private static async sendDownloadedContent(ctx: Context, downloadResult: any, processingMessage: any, url: string): Promise<any> {
     try {
       const { filePath, info, extractor, fileSize, duration, thumbnail } = downloadResult;
       
@@ -324,31 +398,54 @@ export class SocialMediaHandler {
         botConfig.options.downloadFallback.maxFileSize
       ).validateFile(filePath);
       
+      let sentMessage: any;
+      
       if (fileInfo.isVideo) {
-        await ctx.replyWithVideo(new InputFile(filePath), {
+        sentMessage = await ctx.replyWithVideo(new InputFile(filePath), {
           caption: message,
           parse_mode: 'HTML',
           disable_notification: true
         });
       } else if (fileInfo.isAudio) {
-        await ctx.replyWithAudio(new InputFile(filePath), {
+        sentMessage = await ctx.replyWithAudio(new InputFile(filePath), {
           caption: message,
           parse_mode: 'HTML',
           disable_notification: true
         });
       } else if (fileInfo.isImage) {
-        await ctx.replyWithPhoto(new InputFile(filePath), {
+        sentMessage = await ctx.replyWithPhoto(new InputFile(filePath), {
           caption: message,
           parse_mode: 'HTML',
           disable_notification: true
         });
       } else {
         // Fallback to document
-        await ctx.replyWithDocument(new InputFile(filePath), {
+        sentMessage = await ctx.replyWithDocument(new InputFile(filePath), {
           caption: message,
           parse_mode: 'HTML',
           disable_notification: true
         });
+      }
+      
+      // 🆕 ADD TO VIDEO CACHE
+      try {
+        const platform = this.detectPlatformFromUrl(url);
+        await videoCacheService.addEntry(
+          url,
+          sentMessage.message_id,
+          ctx.chat!.id,
+          platform,
+          {
+            title: info?.title,
+            author: info?.uploader,
+            duration: duration,
+            fileSize: fileSize
+          }
+        );
+        console.log(`💾 Cache SAVED for ${url} (fallback)`);
+      } catch (cacheError) {
+        console.error('Error saving to cache:', cacheError);
+        // Don't fail the whole operation if cache fails
       }
       
       // Delete processing message
@@ -363,6 +460,8 @@ export class SocialMediaHandler {
       await downloadService.cleanup(filePath);
       
       console.log(`✅ Successfully sent downloaded content from ${extractor}`);
+      
+      return sentMessage;
       
     } catch (error) {
       console.error('Error sending downloaded content:', error);
