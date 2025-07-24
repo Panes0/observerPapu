@@ -1,11 +1,12 @@
 import { Bot, Context } from "grammy";
 import { SocialMediaHandler } from "./src/bot/handlers/social-media-handler";
 import { registerSocialMediaCommands } from "./src/bot/commands/social-media-commands";
-import { isSocialMediaUrl, extractUrls } from "./src/utils/url-utils";
+import { isSocialMediaUrl, extractUrls, isProcessableUrl } from "./src/utils/url-utils";
 import { botConfig } from "./config/bot.config";
 import { imageSearchService } from "./src/services/image-search";
 import { formatImageResult, formatImageError, formatNoImagesFound, getImageSearchHelp } from "./src/utils/image-utils";
 import { aiService, configureAIService, memoryService } from "./src/services/ai";
+import { configureDownloadService, getDownloadService } from "./src/services/download";
 import { 
   formatAIResult, 
   formatAIError, 
@@ -136,8 +137,8 @@ async function isUserAuthorized(ctx: Context): Promise<boolean> {
   return false;
 }
 
-// Helper function to check if social media links should be processed even for unauthorized users
-async function shouldProcessSocialMediaLinks(ctx: Context): Promise<boolean> {
+// Helper function to check if processable URLs should be processed even for unauthorized users
+async function shouldProcessProcessableUrls(ctx: Context): Promise<boolean> {
   // If whitelist is disabled, always process
   if (!botConfig.options.enableWhitelist) {
     return true;
@@ -178,11 +179,11 @@ async function shouldProcessSocialMediaLinks(ctx: Context): Promise<boolean> {
       const ownerPresent = chatMember.status !== 'left' && chatMember.status !== 'kicked';
       
       if (ownerPresent) {
-        console.log(`🔗 Procesando link de usuario no autorizado (${ctx.from?.first_name}) - Owner presente en grupo`);
+        console.log(`🔗 Procesando URL de usuario no autorizado (${ctx.from?.first_name}) - Owner presente en grupo`);
         return true;
       }
     } catch (error) {
-      console.log('⚠️ Error verificando presencia del owner para procesamiento de links:', error);
+      console.log('⚠️ Error verificando presencia del owner para procesamiento de URLs:', error);
     }
   }
 
@@ -195,6 +196,21 @@ const bot = new Bot(botConfig.token);
 // Configurar el servicio de IA si está habilitado
 if (botConfig.options.enableAI) {
   configureAIService(botConfig.options.ai);
+}
+
+// Configurar el servicio de descarga si está habilitado
+if (botConfig.options.enableDownloadFallback) {
+  configureDownloadService(botConfig.options.downloadFallback);
+  // Mostrar estadísticas de sitios soportados
+  (async () => {
+    try {
+      const { getSupportedSitesStats } = await import("./src/utils/url-utils");
+      const stats = getSupportedSitesStats();
+      console.log(`🚀 Universal download service enabled - Supporting ${stats.totalDomains} domains from ${stats.totalExtractors} yt-dlp extractors!`);
+    } catch (error) {
+      console.log('🚀 Universal download service enabled - Supporting 1000+ sites!');
+    }
+  })();
 }
 
 // Registrar comandos de redes sociales si está habilitado
@@ -852,6 +868,48 @@ bot.command("memory_help", async (ctx) => {
   });
 });
 
+// Comando para mostrar estadísticas de sitios soportados
+bot.command("supported_sites", async (ctx) => {
+  const isAuthorized = await isUserAuthorized(ctx);
+  if (!isAuthorized) {
+    return;
+  }
+  
+  try {
+    const { getSupportedSitesStats } = await import("./src/utils/url-utils");
+    const stats = getSupportedSitesStats();
+    
+    let message = `🌐 <b>Sitios Soportados por yt-dlp</b>\n\n`;
+    message += `📊 <b>Estadísticas:</b>\n`;
+    message += `• <b>Extractores:</b> ${stats.totalExtractors}\n`;
+    message += `• <b>Dominios únicos:</b> ${stats.totalDomains}\n\n`;
+    
+    message += `📱 <b>Ejemplos principales:</b>\n`;
+    const examples = ['youtube.com', 'kick.com', 'vimeo.com', 'dailymotion.com', 'twitch.tv', 
+                     'facebook.com', 'instagram.com', 'tiktok.com', 'twitter.com', 'reddit.com',
+                     'soundcloud.com', 'bandcamp.com', 'bilibili.com', 'bbc.co.uk', 'cnn.com'];
+    
+    examples.forEach(domain => {
+      if (stats.domains.includes(domain)) {
+        message += `✅ ${domain}\n`;
+      }
+    });
+    
+    message += `\n💡 <b>Nota:</b> Solo se muestran algunos ejemplos principales. El bot detecta automáticamente URLs de todos los ${stats.totalDomains} dominios soportados.`;
+    
+    await ctx.reply(message, {
+      parse_mode: "HTML",
+      disable_notification: botConfig.options.silentReplies,
+    });
+    
+  } catch (error) {
+    console.error('Error obteniendo estadísticas de sitios soportados:', error);
+    await ctx.reply("❌ Error obteniendo estadísticas de sitios soportados", {
+      disable_notification: botConfig.options.silentReplies,
+    });
+  }
+});
+
 //This function would be added to the dispatcher as a handler for messages coming from the Bot API
 bot.on("message", async (ctx) => {
   // Check if user is authorized to use the bot
@@ -866,27 +924,48 @@ bot.on("message", async (ctx) => {
     );
   }
 
-  // Verificar si el mensaje contiene URLs de redes sociales
+  // Verificar si el mensaje contiene URLs procesables
   if (ctx.message.text) {
     const urls = extractUrls(ctx.message.text);
-    const socialMediaUrls = urls.filter((url: string) => isSocialMediaUrl(url));
+    const processableUrls = urls.filter((url: string) => isProcessableUrl(url));
     
-    if (socialMediaUrls.length > 0) {
-      // Use special authorization for social media links
-      const shouldProcess = await shouldProcessSocialMediaLinks(ctx);
+    // Handle all processable URLs (includes all social media, video sites, and more)
+    if (processableUrls.length > 0) {
+             // Use special authorization for processable links
+       const shouldProcess = await shouldProcessProcessableUrls(ctx);
       if (!shouldProcess) {
         if (botConfig.options.logMessages) {
-          console.log(`🚫 Link de redes sociales rechazado: ${ctx.from?.first_name} (${ctx.from?.id})`);
+          console.log(`🚫 URL procesable rechazada: ${ctx.from?.first_name} (${ctx.from?.id})`);
         }
         return;
       }
       
       try {
-        console.log("🔍 URL de redes sociales detectada, procesando...");
-        await SocialMediaHandler.handleMessage(ctx);
-        return; // No procesar más si se manejó como URL de redes sociales
+        console.log("🔍 URL procesable detectada, procesando...");
+        
+        // Process URLs that are traditional social media (Twitter, Instagram, TikTok) with the main handler
+        const traditionalSocialMediaUrls = processableUrls.filter((url: string) => isSocialMediaUrl(url));
+        if (traditionalSocialMediaUrls.length > 0) {
+          await SocialMediaHandler.handleMessage(ctx);
+          return;
+        }
+        
+        // Process other URLs with download fallback if enabled
+        if (botConfig.options.enableDownloadFallback && botConfig.options.downloadFallback.enabled) {
+          for (const url of processableUrls) {
+            await SocialMediaHandler.processSocialMediaUrl(ctx, url);
+          }
+          return;
+        } else {
+          // If download fallback is not enabled, show a helpful message
+          await ctx.reply("🔗 URL detectada pero el servicio de descarga universal está deshabilitado", {
+            disable_notification: botConfig.options.silentReplies,
+          });
+          return;
+        }
+        
       } catch (error) {
-        console.error('❌ Error handling social media message:', error);
+        console.error('❌ Error handling processable URL:', error);
         // Continuar con el procesamiento normal si falla
       }
     }

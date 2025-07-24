@@ -2,6 +2,7 @@ export interface BotConfigOptions {
   // Enable or disable bot features
   enableSocialMedia: boolean;
   enableAI: boolean;
+  enableDownloadFallback: boolean;
   
   // Bot behavior settings
   silentReplies: boolean;
@@ -31,6 +32,27 @@ export interface BotConfigOptions {
     temperature: number;
     systemPrompt?: string;
     showWaterConsumption: boolean; // Show water consumption estimate instead of tokens
+  };
+  
+  // Download fallback configuration (youtube-dl-exec)
+  downloadFallback: {
+    enabled: boolean;
+    maxFileSize: number;         // Maximum file size in bytes (50MB default)
+    maxDuration: number;         // Maximum video duration in seconds (10 min default)
+    videoQuality: string;        // Video quality selector (e.g., 'best[height<=720]')
+    audioQuality: string;        // Audio quality selector (e.g., 'best[abr<=128]')
+    extractAudio: boolean;       // Support audio-only content
+    extractSubtitles: boolean;   // Extract subtitles
+    extractThumbnails: boolean;  // Extract thumbnails
+    blockedDomains: string[];    // Domains to block (empty = allow all)
+    nsfwBlocked: boolean;        // Block NSFW content detection
+    blockPlaylists: boolean;     // Block playlist URLs
+    tempDir: string;             // Temporary download directory
+    cleanupAfterSend: boolean;   // Clean up files after sending
+    maxConcurrentDownloads: number; // Max simultaneous downloads
+    showFallbackMessage: boolean;   // Show when using fallback
+    showProgress: boolean;          // Show download progress
+    showExtractorName: boolean;     // Show "Downloading from YouTube..."
   };
 }
 

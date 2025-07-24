@@ -1,9 +1,13 @@
-import { Context } from 'grammy';
+import { Context, InputFile } from 'grammy';
 import { socialMediaManager } from '../../services/social-media';
 import { extractUrls, isSocialMediaUrl } from '../../utils/url-utils';
 import { formatPostForTelegram, formatErrorMessage, getMainMediaType } from '../../utils/media-utils';
 import { SocialMediaPost } from '../../types/social-media';
 import { isAutoDeleteEnabled, getDeleteDelay } from '../../config/social-media-config';
+import { getDownloadService } from '../../services/download';
+import { botConfig } from '../../../config/bot.config';
+import { FileManager } from '../../services/download/file-manager';
+import * as fs from 'fs';
 
 export class SocialMediaHandler {
   /**
@@ -69,7 +73,43 @@ export class SocialMediaHandler {
     } catch (error) {
       console.error('Error processing social media URL:', error);
       
-      // Determine specific error message based on error type
+      // 🆕 TRY DOWNLOAD FALLBACK BEFORE GIVING UP!
+      if (botConfig.options.enableDownloadFallback && botConfig.options.downloadFallback.enabled) {
+        try {
+          console.log('🔄 Trying download fallback with youtube-dl-exec...');
+          
+          // Update processing message to show fallback
+          if (botConfig.options.downloadFallback.showFallbackMessage) {
+            await ctx.api.editMessageText(
+              ctx.chat!.id, 
+              processingMessage.message_id, 
+              '⬬ Descargando contenido... (Usando método alternativo)', 
+              { parse_mode: 'HTML' }
+            );
+          }
+          
+          const downloadService = getDownloadService();
+          const downloadResult = await downloadService.downloadMedia(url);
+          
+          if (downloadResult.success && downloadResult.filePath) {
+            await this.sendDownloadedContent(ctx, downloadResult, processingMessage);
+            
+            // Auto-delete original message if enabled
+            if (isAutoDeleteEnabled() && ctx.message?.message_id) {
+              await this.scheduleMessageDeletion(ctx, ctx.message.message_id);
+            }
+            
+            return; // Success with fallback!
+          } else {
+            console.log('Download fallback also failed:', downloadResult.error);
+          }
+        } catch (downloadError) {
+          console.error('Download fallback failed:', downloadError);
+          // Continue to original error handling
+        }
+      }
+      
+      // Original error handling when fallback is disabled or fails
       let errorMessage: string;
       const platform = this.detectPlatformFromUrl(url);
       
@@ -89,7 +129,12 @@ export class SocialMediaHandler {
         errorMessage = formatErrorMessage(platform, 'Error inesperado al procesar el contenido.');
       }
       
-      // Actualizar mensaje de procesamiento con error
+      // If we tried fallback, mention that both methods failed
+      if (botConfig.options.enableDownloadFallback && botConfig.options.downloadFallback.enabled) {
+        errorMessage = formatErrorMessage(platform, 'No se pudo procesar el contenido con ningún método disponible.');
+      }
+      
+      // Update processing message with error
       await ctx.api.editMessageText(ctx.chat!.id, processingMessage.message_id, errorMessage, { parse_mode: 'HTML' });
     }
   }
@@ -223,6 +268,128 @@ export class SocialMediaHandler {
     };
     
     return emojis[platform] || '📱';
+  }
+
+  /**
+   * Envía contenido descargado usando el servicio de fallback
+   */
+  private static async sendDownloadedContent(ctx: Context, downloadResult: any, processingMessage: any): Promise<void> {
+    try {
+      const { filePath, info, extractor, fileSize, duration, thumbnail } = downloadResult;
+      
+      // Validate file exists
+      if (!fs.existsSync(filePath)) {
+        throw new Error('Downloaded file not found');
+      }
+      
+      // Create message with download info
+      let message = '';
+      
+      if (botConfig.options.downloadFallback.showExtractorName && extractor) {
+        const extractorEmoji = this.getExtractorEmoji(extractor);
+        message += `${extractorEmoji} <b>${extractor.toUpperCase()}</b>\n`;
+      }
+      
+      if (info?.uploader) {
+        message += `👤 <b>Autor:</b> ${info.uploader}\n`;
+      }
+      
+      if (info?.title) {
+        message += `\n📝 <b>Título:</b>\n${info.title}\n`;
+      }
+      
+      // Add metadata
+      const metadata = [];
+      if (duration) {
+        metadata.push(`⏱️ ${FileManager.formatDuration(duration)}`);
+      }
+      if (fileSize) {
+        metadata.push(`📦 ${FileManager.formatFileSize(fileSize)}`);
+      }
+      if (info?.view_count) {
+        metadata.push(`👁️ ${info.view_count.toLocaleString()}`);
+      }
+      
+      if (metadata.length > 0) {
+        message += `\n${metadata.join(' | ')}\n`;
+      }
+      
+      if (info?.webpage_url) {
+        message += `\n🔗 <a href="${info.webpage_url}">Ver original</a>`;
+      }
+      
+      // Determine file type and send accordingly
+      const fileInfo = await new (await import('../../services/download/file-manager')).FileManager(
+        botConfig.options.downloadFallback.tempDir,
+        botConfig.options.downloadFallback.maxFileSize
+      ).validateFile(filePath);
+      
+      if (fileInfo.isVideo) {
+        await ctx.replyWithVideo(new InputFile(filePath), {
+          caption: message,
+          parse_mode: 'HTML',
+          disable_notification: true
+        });
+      } else if (fileInfo.isAudio) {
+        await ctx.replyWithAudio(new InputFile(filePath), {
+          caption: message,
+          parse_mode: 'HTML',
+          disable_notification: true
+        });
+      } else if (fileInfo.isImage) {
+        await ctx.replyWithPhoto(new InputFile(filePath), {
+          caption: message,
+          parse_mode: 'HTML',
+          disable_notification: true
+        });
+      } else {
+        // Fallback to document
+        await ctx.replyWithDocument(new InputFile(filePath), {
+          caption: message,
+          parse_mode: 'HTML',
+          disable_notification: true
+        });
+      }
+      
+      // Delete processing message
+      try {
+        await ctx.api.deleteMessage(ctx.chat!.id, processingMessage.message_id);
+      } catch (error) {
+        console.log('Could not delete processing message:', error);
+      }
+      
+      // Clean up downloaded file
+      const downloadService = getDownloadService();
+      await downloadService.cleanup(filePath);
+      
+      console.log(`✅ Successfully sent downloaded content from ${extractor}`);
+      
+    } catch (error) {
+      console.error('Error sending downloaded content:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Gets emoji for extractor/platform
+   */
+  private static getExtractorEmoji(extractor: string): string {
+    const emojis: Record<string, string> = {
+      youtube: '📺',
+      twitter: '🐦',
+      instagram: '📷',
+      tiktok: '🎵',
+      facebook: '📘',
+      reddit: '🤖',
+      twitch: '🎮',
+      vimeo: '🎬',
+      soundcloud: '🎧',
+      bandcamp: '🎵',
+      dailymotion: '📹',
+      'generic': '⬬'
+    };
+    
+    return emojis[extractor.toLowerCase()] || emojis['generic'];
   }
 
   /**

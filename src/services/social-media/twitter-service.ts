@@ -17,10 +17,34 @@ export class TwitterService extends BaseSocialMediaService {
 
   async extractPost(url: string): Promise<SocialMediaPost> {
     const tweetId = this.extractTweetId(url);
-    const apiUrl = `${this.baseUrl}/status/${tweetId}`;
+    // Usamos expansiones para obtener también los tweets referenciados y su media
+    const apiUrl = `${this.baseUrl}/status/${tweetId}?expansions=referenced_tweets.id,attachments.media_keys&tweet.fields=attachments,referenced_tweets,created_at,public_metrics,author_id&media.fields=url,type,duration_ms`;
     
     try {
       const data = await this.makeRequest(apiUrl);
+      
+      // Extraer media del tweet principal
+      let allMedia = this.extractMedia(data.tweet);
+      
+      // Si hay tweets referenciados (respuestas, retweets, etc.) y están incluidos en la respuesta
+      if (data.includes?.tweets) {
+        for (const referencedTweet of data.includes.tweets) {
+          const referencedMedia = this.extractMedia(referencedTweet);
+          // Agregar la media del tweet referenciado al array principal
+          allMedia = [...allMedia, ...referencedMedia];
+        }
+      }
+      
+      // Si hay media expandida en includes
+      if (data.includes?.media) {
+        const expandedMedia = this.extractExpandedMedia(data.includes.media);
+        // Combinar con la media ya extraída, evitando duplicados
+        expandedMedia.forEach(media => {
+          if (!allMedia.some(existing => existing.url === media.url)) {
+            allMedia.push(media);
+          }
+        });
+      }
       
       return {
         id: data.tweet.id,
@@ -28,7 +52,7 @@ export class TwitterService extends BaseSocialMediaService {
         url: data.tweet.url,
         author: data.tweet.author.name,
         content: data.tweet.text,
-        media: this.extractMedia(data.tweet),
+        media: allMedia,
         timestamp: new Date(data.tweet.date),
         likes: data.tweet.likes,
         shares: data.tweet.retweets,
@@ -95,6 +119,35 @@ export class TwitterService extends BaseSocialMediaService {
         });
       });
     }
+
+    return media;
+  }
+
+  private extractExpandedMedia(mediaArray: any[]): MediaItem[] {
+    const media: MediaItem[] = [];
+
+    mediaArray.forEach((item: any) => {
+      if (item.type === 'photo') {
+        media.push({
+          type: 'image',
+          url: item.url,
+          thumbnail: item.url
+        });
+      } else if (item.type === 'video') {
+        media.push({
+          type: 'video',
+          url: item.url,
+          thumbnail: item.preview_image_url || item.url,
+          duration: item.duration_ms ? Math.floor(item.duration_ms / 1000) : undefined
+        });
+      } else if (item.type === 'animated_gif') {
+        media.push({
+          type: 'gif',
+          url: item.url,
+          thumbnail: item.preview_image_url || item.url
+        });
+      }
+    });
 
     return media;
   }

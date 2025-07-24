@@ -134,3 +134,6 @@ lib/
 # Chat memory files (contains user conversation data)
 .chat-memory/
 *.chat-memory 
+
+# Temporary download directory
+temp_downloads/
