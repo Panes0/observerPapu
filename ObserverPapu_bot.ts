@@ -1033,6 +1033,389 @@ bot.command("supported_sites", async (ctx) => {
   }
 });
 
+// Comando para configurar el manejo de mensajes
+bot.command("message_config", async (ctx) => {
+  const isAuthorized = await isUserAuthorized(ctx);
+  if (!isAuthorized) {
+    return;
+  }
+  
+  const args = ctx.message?.text?.split(' ').slice(1);
+  
+  if (!args || args.length === 0) {
+    // Mostrar configuración actual
+    const config = botConfig.options.messageManagement;
+    
+    let message = `🗂️ <b>Configuración de Mensajes</b>\n\n`;
+    message += `📋 <b>Estado actual:</b>\n`;
+    message += `• <b>Auto-eliminar originales:</b> ${config?.autoDeleteOriginalMessage ? '✅ Sí' : '❌ No'}\n`;
+    message += `• <b>Delay de eliminación:</b> ${(config?.deleteDelay || 2000) / 1000} segundos\n\n`;
+    
+    if (config?.autoDeleteOriginalMessage) {
+      message += `🔄 <b>Comportamiento actual:</b>\n`;
+      message += `Los mensajes con URLs se eliminan automáticamente después de procesar el contenido.\n\n`;
+    } else {
+      message += `💾 <b>Comportamiento actual:</b>\n`;
+      message += `Los mensajes con URLs se mantienen (no se eliminan).\n\n`;
+    }
+    
+    message += `💡 <b>Comandos disponibles:</b>\n`;
+    message += `• <code>/message_config autodelete on</code> - Habilitar auto-eliminación\n`;
+    message += `• <code>/message_config autodelete off</code> - Deshabilitar auto-eliminación\n`;
+    message += `• <code>/message_config delay [segundos]</code> - Cambiar delay (ej: 3)\n`;
+    message += `• <code>/message_config toggle</code> - Alternar auto-eliminación\n`;
+    
+    await ctx.reply(message, {
+      parse_mode: "HTML",
+      disable_notification: botConfig.options.silentReplies,
+    });
+    return;
+  }
+  
+  const command = args[0].toLowerCase();
+  
+  switch (command) {
+    case 'autodelete':
+      if (args[1] === 'on') {
+        if (!botConfig.options.messageManagement) {
+          botConfig.options.messageManagement = { autoDeleteOriginalMessage: true, deleteDelay: 2000 };
+        } else {
+          botConfig.options.messageManagement.autoDeleteOriginalMessage = true;
+        }
+        await ctx.reply("✅ Auto-eliminación de mensajes originales habilitada", {
+          disable_notification: botConfig.options.silentReplies,
+        });
+      } else if (args[1] === 'off') {
+        if (!botConfig.options.messageManagement) {
+          botConfig.options.messageManagement = { autoDeleteOriginalMessage: false, deleteDelay: 2000 };
+        } else {
+          botConfig.options.messageManagement.autoDeleteOriginalMessage = false;
+        }
+        await ctx.reply("❌ Auto-eliminación de mensajes originales deshabilitada", {
+          disable_notification: botConfig.options.silentReplies,
+        });
+      } else {
+        await ctx.reply("❌ Usa: on o off", {
+          disable_notification: botConfig.options.silentReplies,
+        });
+      }
+      break;
+      
+    case 'toggle':
+      if (!botConfig.options.messageManagement) {
+        botConfig.options.messageManagement = { autoDeleteOriginalMessage: true, deleteDelay: 2000 };
+      } else {
+        botConfig.options.messageManagement.autoDeleteOriginalMessage = !botConfig.options.messageManagement.autoDeleteOriginalMessage;
+      }
+      
+      const newState = botConfig.options.messageManagement.autoDeleteOriginalMessage;
+      await ctx.reply(`${newState ? '✅' : '❌'} Auto-eliminación ${newState ? 'habilitada' : 'deshabilitada'}`, {
+        disable_notification: botConfig.options.silentReplies,
+      });
+      break;
+      
+    case 'delay':
+      if (args[1] && !isNaN(Number(args[1]))) {
+        const seconds = Number(args[1]);
+        if (seconds < 1 || seconds > 60) {
+          await ctx.reply("❌ El delay debe estar entre 1 y 60 segundos", {
+            disable_notification: botConfig.options.silentReplies,
+          });
+          return;
+        }
+        
+        if (!botConfig.options.messageManagement) {
+          botConfig.options.messageManagement = { autoDeleteOriginalMessage: false, deleteDelay: seconds * 1000 };
+        } else {
+          botConfig.options.messageManagement.deleteDelay = seconds * 1000;
+        }
+        
+        await ctx.reply(`✅ Delay de eliminación cambiado a ${seconds} segundos`, {
+          disable_notification: botConfig.options.silentReplies,
+        });
+      } else {
+        await ctx.reply("❌ Especifica un número de segundos válido (1-60)", {
+          disable_notification: botConfig.options.silentReplies,
+        });
+      }
+      break;
+      
+    default:
+      await ctx.reply("❌ Comando no válido. Usa /message_config sin parámetros para ver ayuda.", {
+        disable_notification: botConfig.options.silentReplies,
+      });
+  }
+});
+
+// Comando para configurar la atribución del usuario
+bot.command("user_attribution", async (ctx) => {
+  const isAuthorized = await isUserAuthorized(ctx);
+  if (!isAuthorized) {
+    return;
+  }
+  
+  const args = ctx.message?.text?.split(' ').slice(1);
+  
+  if (!args || args.length === 0) {
+    // Mostrar configuración actual
+    const config = botConfig.options.userAttribution;
+    
+    let message = `👤 <b>Configuración de Atribución</b>\n\n`;
+    message += `📋 <b>Estado actual:</b>\n`;
+    message += `• <b>Habilitado:</b> ${config.enabled ? '✅ Sí' : '❌ No'}\n`;
+    message += `• <b>Emoji:</b> ${config.emoji}\n`;
+    message += `• <b>Mostrar username:</b> ${config.showUsername ? '✅ Sí' : '❌ No'}\n`;
+    message += `• <b>Mostrar nombre:</b> ${config.showFirstName ? '✅ Sí' : '❌ No'}\n`;
+    message += `• <b>Posición:</b> ${config.position === 'top' ? 'Arriba' : 'Abajo'}\n\n`;
+    
+    if (config.enabled) {
+      const user = ctx.from;
+      if (user) {
+        let exampleName = '';
+        if (config.showUsername && user.username) {
+          exampleName = `@${user.username}`;
+        } else if (config.showFirstName && user.first_name) {
+          exampleName = user.first_name;
+        } else {
+          exampleName = `Usuario ${user.id}`;
+        }
+        message += `📋 <b>Ejemplo con tu usuario:</b>\n`;
+        message += `${config.emoji} <i>${exampleName}</i>\n\n`;
+      }
+    }
+    
+    message += `💡 <b>Comandos disponibles:</b>\n`;
+    message += `• <code>/user_attribution on</code> - Habilitar atribución\n`;
+    message += `• <code>/user_attribution off</code> - Deshabilitar atribución\n`;
+    message += `• <code>/user_attribution emoji [emoji]</code> - Cambiar emoji (ej: 🔗)\n`;
+    message += `• <code>/user_attribution position top</code> - Mostrar arriba\n`;
+    message += `• <code>/user_attribution position bottom</code> - Mostrar abajo\n`;
+    message += `• <code>/user_attribution username on/off</code> - Mostrar @username\n`;
+    message += `• <code>/user_attribution name on/off</code> - Mostrar nombre\n`;
+    
+    await ctx.reply(message, {
+      parse_mode: "HTML",
+      disable_notification: botConfig.options.silentReplies,
+    });
+    return;
+  }
+  
+  const command = args[0].toLowerCase();
+  
+  switch (command) {
+    case 'on':
+      botConfig.options.userAttribution.enabled = true;
+      await ctx.reply("✅ Atribución de usuario habilitada", {
+        disable_notification: botConfig.options.silentReplies,
+      });
+      break;
+      
+    case 'off':
+      botConfig.options.userAttribution.enabled = false;
+      await ctx.reply("❌ Atribución de usuario deshabilitada", {
+        disable_notification: botConfig.options.silentReplies,
+      });
+      break;
+      
+    case 'emoji':
+      if (args[1]) {
+        botConfig.options.userAttribution.emoji = args[1];
+        await ctx.reply(`✅ Emoji cambiado a: ${args[1]}`, {
+          disable_notification: botConfig.options.silentReplies,
+        });
+      } else {
+        await ctx.reply("❌ Especifica un emoji. Ejemplo: /user_attribution emoji 🔗", {
+          disable_notification: botConfig.options.silentReplies,
+        });
+      }
+      break;
+      
+    case 'position':
+      if (args[1] === 'top' || args[1] === 'bottom') {
+        botConfig.options.userAttribution.position = args[1];
+        await ctx.reply(`✅ Posición cambiada a: ${args[1] === 'top' ? 'Arriba' : 'Abajo'}`, {
+          disable_notification: botConfig.options.silentReplies,
+        });
+      } else {
+        await ctx.reply("❌ Posición válida: top o bottom", {
+          disable_notification: botConfig.options.silentReplies,
+        });
+      }
+      break;
+      
+    case 'username':
+      if (args[1] === 'on') {
+        botConfig.options.userAttribution.showUsername = true;
+        await ctx.reply("✅ Mostrar @username habilitado", {
+          disable_notification: botConfig.options.silentReplies,
+        });
+      } else if (args[1] === 'off') {
+        botConfig.options.userAttribution.showUsername = false;
+        await ctx.reply("❌ Mostrar @username deshabilitado", {
+          disable_notification: botConfig.options.silentReplies,
+        });
+      } else {
+        await ctx.reply("❌ Usa: on o off", {
+          disable_notification: botConfig.options.silentReplies,
+        });
+      }
+      break;
+      
+    case 'name':
+      if (args[1] === 'on') {
+        botConfig.options.userAttribution.showFirstName = true;
+        await ctx.reply("✅ Mostrar nombre habilitado", {
+          disable_notification: botConfig.options.silentReplies,
+        });
+      } else if (args[1] === 'off') {
+        botConfig.options.userAttribution.showFirstName = false;
+        await ctx.reply("❌ Mostrar nombre deshabilitado", {
+          disable_notification: botConfig.options.silentReplies,
+        });
+      } else {
+        await ctx.reply("❌ Usa: on o off", {
+          disable_notification: botConfig.options.silentReplies,
+        });
+      }
+      break;
+      
+    default:
+      await ctx.reply("❌ Comando no válido. Usa /user_attribution sin parámetros para ver ayuda.", {
+        disable_notification: botConfig.options.silentReplies,
+      });
+  }
+});
+
+// Comando para configurar el comportamiento del caché
+bot.command("cache_config", async (ctx) => {
+  const isAuthorized = await isUserAuthorized(ctx);
+  if (!isAuthorized) {
+    return;
+  }
+  
+  const args = ctx.message?.text?.split(' ').slice(1);
+  
+  if (!args || args.length === 0) {
+    // Mostrar configuración actual
+    const showIndicator = botConfig.options.videoCache?.showCacheIndicator ?? false;
+    
+    let message = `⚙️ <b>Configuración del Caché</b>\n\n`;
+    message += `📋 <b>Estado actual:</b>\n`;
+    message += `• <b>Mostrar indicador de caché:</b> ${showIndicator ? '✅ Sí' : '❌ No'}\n\n`;
+    
+    if (showIndicator) {
+      message += `🔄 <b>Comportamiento actual:</b>\n`;
+      message += `Los videos del caché muestran "🔄 Contenido desde caché"\n\n`;
+    } else {
+      message += `🎭 <b>Comportamiento actual:</b>\n`;
+      message += `Los videos del caché se ven exactamente igual que la primera vez\n\n`;
+    }
+    
+    message += `💡 <b>Comandos disponibles:</b>\n`;
+    message += `• <code>/cache_config show</code> - Mostrar indicador de caché\n`;
+    message += `• <code>/cache_config hide</code> - Ocultar indicador (transparente)\n`;
+    message += `• <code>/cache_config toggle</code> - Alternar configuración\n`;
+    
+    await ctx.reply(message, {
+      parse_mode: "HTML",
+      disable_notification: botConfig.options.silentReplies,
+    });
+    return;
+  }
+  
+  const command = args[0].toLowerCase();
+  let newValue: boolean;
+  let actionText: string;
+  
+  switch (command) {
+    case 'show':
+      newValue = true;
+      actionText = 'Los videos del caché mostrarán "🔄 Contenido desde caché"';
+      break;
+    case 'hide':
+      newValue = false;
+      actionText = 'Los videos del caché se verán exactamente igual que la primera vez';
+      break;
+    case 'toggle':
+      newValue = !(botConfig.options.videoCache?.showCacheIndicator ?? false);
+      actionText = newValue ? 
+        'Los videos del caché mostrarán "🔄 Contenido desde caché"' :
+        'Los videos del caché se verán exactamente igual que la primera vez';
+      break;
+    default:
+      await ctx.reply("❌ Comando no válido. Usa: show, hide, o toggle", {
+        disable_notification: botConfig.options.silentReplies,
+      });
+      return;
+  }
+  
+  // Actualizar configuración
+  if (!botConfig.options.videoCache) {
+    botConfig.options.videoCache = { showCacheIndicator: false };
+  }
+  botConfig.options.videoCache.showCacheIndicator = newValue;
+  
+  await ctx.reply(`✅ <b>Configuración actualizada</b>\n\n${actionText}`, {
+    parse_mode: "HTML",
+    disable_notification: botConfig.options.silentReplies,
+  });
+});
+
+// Comando para mostrar información sobre procesamiento de videos
+bot.command("video_processing_info", async (ctx) => {
+  const isAuthorized = await isUserAuthorized(ctx);
+  if (!isAuthorized) {
+    return;
+  }
+  
+  try {
+    const videoConfig = botConfig.options.videoProcessing;
+    
+    let message = `📹 <b>Procesamiento de Videos</b>\n\n`;
+    
+    if (!videoConfig?.enabled) {
+      message += `❌ <b>Estado:</b> Deshabilitado\n\n`;
+      message += `💡 Para habilitar el procesamiento de videos, configura:\n`;
+      message += `<code>videoProcessing.enabled = true</code> en bot.config.ts\n\n`;
+      message += `🎯 <b>Beneficios del procesamiento:</b>\n`;
+      message += `• ✅ Previsualizaciones en Telegram\n`;
+      message += `• ✅ Reproducción inline\n`;
+      message += `• ✅ Miniaturas correctas\n`;
+      message += `• 📦 Archivos más pequeños\n`;
+    } else {
+      message += `✅ <b>Estado:</b> Habilitado\n\n`;
+      message += `⚙️ <b>Configuración actual:</b>\n`;
+      message += `• <b>Faststart:</b> ${videoConfig.faststart ? '✅' : '❌'}\n`;
+      message += `• <b>Recodificación:</b> ${videoConfig.reencodeVideos ? 'Forzada' : 'Solo si es necesario'}\n`;
+      message += `• <b>Resolución máxima:</b> ${videoConfig.maxResolution?.width}x${videoConfig.maxResolution?.height}\n`;
+      message += `• <b>Nivel de compresión:</b> CRF ${videoConfig.compressionLevel}\n`;
+      message += `• <b>Tamaño máximo:</b> ${Math.round(videoConfig.maxFileSize / (1024 * 1024))}MB\n`;
+      message += `• <b>Duración máxima:</b> ${Math.round(videoConfig.maxDuration / 60)} minutos\n`;
+      message += `• <b>Omitir archivos pequeños:</b> ${videoConfig.skipOptimizationForSmallFiles ? '✅' : '❌'}\n`;
+      message += `• <b>Mostrar progreso:</b> ${videoConfig.showProcessingProgress ? '✅' : '❌'}\n\n`;
+      
+      message += `🎯 <b>Qué hace el procesamiento:</b>\n`;
+      message += `• 📹 Mueve metadatos al principio (faststart)\n`;
+      message += `• 🔧 Optimiza resolución para Telegram\n`;
+      message += `• 📦 Comprime videos grandes\n`;
+      message += `• ⚡ Mejora velocidad de carga\n\n`;
+      
+      message += `💡 <b>Nota:</b> Los videos se procesan automáticamente cuando se detectan URLs. No es necesario hacer nada adicional.`;
+    }
+    
+    await ctx.reply(message, {
+      parse_mode: "HTML",
+      disable_notification: botConfig.options.silentReplies,
+    });
+    
+  } catch (error) {
+    console.error('Error obteniendo información de procesamiento de videos:', error);
+    await ctx.reply("❌ Error obteniendo información de procesamiento de videos", {
+      disable_notification: botConfig.options.silentReplies,
+    });
+  }
+});
+
 //This function would be added to the dispatcher as a handler for messages coming from the Bot API
 bot.on("message", async (ctx) => {
   // Check if user is authorized to use the bot

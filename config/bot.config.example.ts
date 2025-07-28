@@ -63,5 +63,41 @@ export const botConfig: BotConfig = {
       showProgress: true,                // Show download progress
       showExtractorName: true,           // Show "Downloading from YouTube..."
     },
+    
+    // Video processing configuration (ffmpeg) - Optimizes videos for Telegram
+    videoProcessing: {
+      enabled: true,                     // Enable video optimization for better Telegram compatibility
+      faststart: true,                   // Move metadata to beginning (FIXES TELEGRAM PREVIEWS!)
+      reencodeVideos: false,             // Only reencode when necessary (faster)
+      maxResolution: {                   // Maximum resolution for videos
+        width: 1280,                     // Max 1280px width
+        height: 720                      // Max 720px height (720p)
+      },
+      compressionLevel: 28,              // CRF value (0-51, 28 = good quality/size balance)
+      maxFileSize: 50 * 1024 * 1024,    // 50MB maximum output file size
+      maxDuration: 300,                  // 5 minutes maximum duration
+      skipOptimizationForSmallFiles: true, // Skip processing for files smaller than 5MB
+      showProcessingProgress: true,      // Show "📹 Processing video: 45%" messages
+    },
+    
+    // Video cache configuration
+    videoCache: {
+      showCacheIndicator: false,         // false = Copy exactly like first time, true = Show "🔄 Contenido desde caché"
+    },
+    
+    // User attribution configuration
+    userAttribution: {
+      enabled: true,                     // Show who requested the content
+      emoji: '💬',                       // Emoji for user attribution (🔗📱👤🙋‍♂️🎯)
+      showUsername: true,                // Show @username if available
+      showFirstName: true,               // Show first name as fallback
+      position: 'bottom',                // Show at bottom of message ('top' or 'bottom')
+    },
+    
+    // Message management configuration
+    messageManagement: {
+      autoDeleteOriginalMessage: false,  // Keep original URL messages (false = no delete, true = auto delete)
+      deleteDelay: 2000,                 // Delay before deleting in milliseconds (2 seconds)
+    },
   }
 }; 

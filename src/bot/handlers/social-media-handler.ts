@@ -3,11 +3,13 @@ import { socialMediaManager } from '../../services/social-media';
 import { extractUrls, isSocialMediaUrl, isProcessableUrl, getDomain } from '../../utils/url-utils';
 import { formatPostForTelegram, formatErrorMessage, getMainMediaType } from '../../utils/media-utils';
 import { SocialMediaPost } from '../../types/social-media';
-import { isAutoDeleteEnabled, getDeleteDelay } from '../../config/social-media-config';
+// Removed old social-media-config imports - now using main bot config
 import { getDownloadService } from '../../services/download';
 import { botConfig } from '../../../config/bot.config';
 import { FileManager } from '../../services/download/file-manager';
 import { videoCacheService } from '../../services/video-cache';
+import { getVideoOptimizer } from '../../services/video-processing';
+import { addUserAttribution } from '../../utils/user-utils';
 import * as fs from 'fs';
 
 export class SocialMediaHandler {
@@ -27,7 +29,10 @@ export class SocialMediaHandler {
       try {
         await this.processSocialMediaUrl(ctx, url);
       } catch (error) {
-        console.error(`Error processing URL ${url}:`, error);
+        // Compact error logging for failed URL processing
+        const domain = this.detectPlatformFromUrl(url);
+        const errorMsg = error instanceof Error ? error.message.split('\n')[0] : 'Unknown error';
+        console.log(`❌ Failed to process ${domain.toUpperCase()} URL: ${errorMsg}`);
         try {
           const platform = this.detectPlatformFromUrl(url);
           const errorMessage = formatErrorMessage(platform, 'No se pudo procesar el contenido');
@@ -51,33 +56,44 @@ export class SocialMediaHandler {
     const cachedEntry = videoCacheService.getCachedEntry(url);
     if (cachedEntry) {
       try {
-        // Intentar hacer forward del mensaje cacheado (ocultando autor original)
-        const forwardedMessage = await ctx.api.forwardMessage(
-          ctx.chat!.id, 
-          cachedEntry.chatId, 
-          cachedEntry.messageId
-        );
+        let copiedMessage: any;
+        
+        if (botConfig.options.videoCache?.showCacheIndicator) {
+          // Mostrar indicador de caché con atribución del usuario
+          let cacheMessage = `🔄 <b>Contenido desde caché</b>\n\n🔗 <a href="${url}">Ver original</a>`;
+          cacheMessage = addUserAttribution(cacheMessage, ctx);
+          
+          copiedMessage = await ctx.api.copyMessage(
+            ctx.chat!.id, 
+            cachedEntry.chatId, 
+            cachedEntry.messageId,
+            {
+              caption: cacheMessage,
+              parse_mode: 'HTML',
+              disable_notification: botConfig.options.silentReplies
+            }
+          );
+        } else {
+          // Copiar exactamente igual que la primera vez (preserva caption original automáticamente)
+          copiedMessage = await ctx.api.copyMessage(
+            ctx.chat!.id, 
+            cachedEntry.chatId, 
+            cachedEntry.messageId,
+            {
+              disable_notification: botConfig.options.silentReplies
+            }
+          );
+          
+          // TODO: Implementar atribución para mensajes de caché
+          // Por ahora, los mensajes del caché se muestran exactamente igual que la primera vez
+          // La atribución se aplicará solo a contenido nuevo hasta que mejoremos el sistema de caché
+        }
         
         console.log(`💾 Video enviado desde caché: ${cachedEntry.platform} - ${url}`);
         
-        // Eliminar nombre del autor original del forward
-        try {
-          await ctx.api.editMessageCaption(
-            ctx.chat!.id,
-            forwardedMessage.message_id,
-            {
-              caption: `🔄 <b>Contenido desde caché</b>\n\n🔗 <a href="${url}">Ver original</a>`,
-              parse_mode: 'HTML'
-            }
-          );
-        } catch (editError) {
-          // Si no se puede editar, no es crítico
-          console.log('No se pudo editar caption del mensaje forwarded');
-        }
-        
         return; // Terminar aquí si el caché funcionó
-      } catch (forwardError) {
-        console.log(`❌ Error al forward desde caché, procesando normalmente: ${forwardError}`);
+      } catch (copyError) {
+        console.log(`❌ Error al copiar desde caché, procesando normalmente: ${copyError}`);
         // Remover entrada inválida del caché
         videoCacheService.removeEntry(url);
       }
@@ -97,7 +113,10 @@ export class SocialMediaHandler {
       const post = await socialMediaManager.extractPost(url);
       
       // Formatear mensaje
-      const formattedMessage = formatPostForTelegram(post);
+      let formattedMessage = formatPostForTelegram(post);
+      
+      // Agregar atribución del usuario
+      formattedMessage = addUserAttribution(formattedMessage, ctx);
       
       // Enviar contenido según el tipo de medio
       sentMessage = await this.sendPostContent(ctx, post, formattedMessage);
@@ -127,17 +146,20 @@ export class SocialMediaHandler {
       await ctx.api.deleteMessage(ctx.chat!.id, processingMessage.message_id);
       
       // Auto-delete original message if enabled
-      if (isAutoDeleteEnabled() && ctx.message?.message_id) {
+      if (botConfig.options.messageManagement?.autoDeleteOriginalMessage && ctx.message?.message_id) {
         await this.scheduleMessageDeletion(ctx, ctx.message.message_id);
       }
       
     } catch (error) {
-      console.error('Error processing social media URL:', error);
+      // More compact error logging - full stack trace is usually not needed
+      const platformName = this.detectPlatformFromUrl(url);
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      console.log(`⚠️ ${platformName.toUpperCase()} service unavailable: ${errorMsg.split('\n')[0]}`);
       
       // 🆕 TRY DOWNLOAD FALLBACK BEFORE GIVING UP!
       if (botConfig.options.enableDownloadFallback && botConfig.options.downloadFallback.enabled) {
         try {
-          console.log('🔄 Trying download fallback with youtube-dl-exec...');
+          console.log(`🔄 ${platformName.toUpperCase()} API failed, trying universal download fallback...`);
           
           // Update processing message to show fallback
           if (botConfig.options.downloadFallback.showFallbackMessage) {
@@ -156,7 +178,7 @@ export class SocialMediaHandler {
             const sentMessage = await this.sendDownloadedContent(ctx, downloadResult, processingMessage, url);
             
             // Auto-delete original message if enabled
-            if (isAutoDeleteEnabled() && ctx.message?.message_id) {
+            if (botConfig.options.messageManagement?.autoDeleteOriginalMessage && ctx.message?.message_id) {
               await this.scheduleMessageDeletion(ctx, ctx.message.message_id);
             }
             
@@ -165,7 +187,8 @@ export class SocialMediaHandler {
             console.log('Download fallback also failed:', downloadResult.error);
           }
         } catch (downloadError) {
-          console.error('Download fallback failed:', downloadError);
+          const errorMsg = downloadError instanceof Error ? downloadError.message.split('\n')[0] : 'Unknown error';
+          console.log(`⚠️ Download fallback failed: ${errorMsg}`);
           // Continue to original error handling
         }
       }
@@ -392,16 +415,73 @@ export class SocialMediaHandler {
         message += `\n🔗 <a href="${info.webpage_url}">Ver original</a>`;
       }
       
+      // Agregar atribución del usuario
+      message = addUserAttribution(message, ctx);
+      
       // Determine file type and send accordingly
       const fileInfo = await new (await import('../../services/download/file-manager')).FileManager(
         botConfig.options.downloadFallback.tempDir,
         botConfig.options.downloadFallback.maxFileSize
       ).validateFile(filePath);
       
+      let finalFilePath = filePath;
       let sentMessage: any;
       
+      // 📹 OPTIMIZE VIDEO FOR TELEGRAM if enabled and it's a video file
+      if (fileInfo.isVideo && botConfig.options.videoProcessing?.enabled) {
+        try {
+          const fileSize = fs.statSync(filePath).size;
+          const shouldOptimize = !botConfig.options.videoProcessing.skipOptimizationForSmallFiles || 
+                                fileSize > 5 * 1024 * 1024; // 5MB threshold
+          
+          if (shouldOptimize) {
+            // Show video processing message
+            if (botConfig.options.videoProcessing.showProcessingProgress) {
+              await ctx.api.editMessageText(
+                ctx.chat!.id,
+                processingMessage.message_id,
+                '📹 Optimizando video para Telegram...',
+                { parse_mode: 'HTML' }
+              );
+            }
+            
+            const videoOptimizer = getVideoOptimizer(botConfig.options.downloadFallback.tempDir);
+            const optimizationResult = await videoOptimizer.optimizeVideo(filePath, {
+              faststart: botConfig.options.videoProcessing.faststart,
+              reencode: botConfig.options.videoProcessing.reencodeVideos,
+              crf: botConfig.options.videoProcessing.compressionLevel,
+              maxResolution: botConfig.options.videoProcessing.maxResolution,
+              maxDuration: botConfig.options.videoProcessing.maxDuration,
+              maxFileSize: botConfig.options.videoProcessing.maxFileSize
+            });
+            
+            if (optimizationResult.success && optimizationResult.optimizedPath) {
+              finalFilePath = optimizationResult.optimizedPath;
+              
+              if (optimizationResult.wasOptimized) {
+                const processingTime = optimizationResult.processingTime! / 1000;
+                console.log(`📹 Video optimized in ${processingTime.toFixed(1)}s for better Telegram compatibility`);
+                
+                // Add optimization info to message
+                const sizeReduction = optimizationResult.sizeReduction || 0;
+                if (sizeReduction > 0) {
+                  message += `\n📹 <i>Optimizado para Telegram (${sizeReduction.toFixed(1)}% reducción)</i>`;
+                } else {
+                  message += `\n📹 <i>Optimizado para Telegram</i>`;
+                }
+              }
+            } else {
+              console.log('⚠️ Video optimization failed, using original file:', optimizationResult.error);
+            }
+          }
+        } catch (optimizationError) {
+          console.error('❌ Error durante optimización de video:', optimizationError);
+          // Continue with original file if optimization fails
+        }
+      }
+      
       if (fileInfo.isVideo) {
-        sentMessage = await ctx.replyWithVideo(new InputFile(filePath), {
+        sentMessage = await ctx.replyWithVideo(new InputFile(finalFilePath), {
           caption: message,
           parse_mode: 'HTML',
           disable_notification: true
@@ -455,9 +535,19 @@ export class SocialMediaHandler {
         console.log('Could not delete processing message:', error);
       }
       
-      // Clean up downloaded file
+      // Clean up downloaded files (both original and optimized)
       const downloadService = getDownloadService();
       await downloadService.cleanup(filePath);
+      
+      // Clean up optimized file if it's different from original
+      if (finalFilePath !== filePath && fs.existsSync(finalFilePath)) {
+        try {
+          await fs.promises.unlink(finalFilePath);
+          console.log(`🗑️ Cleaned up optimized video: ${finalFilePath}`);
+        } catch (cleanupError) {
+          console.error('Error cleaning up optimized video:', cleanupError);
+        }
+      }
       
       console.log(`✅ Successfully sent downloaded content from ${extractor}`);
       
@@ -495,7 +585,7 @@ export class SocialMediaHandler {
    * Programa el borrado de un mensaje después de un delay
    */
   private static async scheduleMessageDeletion(ctx: Context, messageId: number): Promise<void> {
-    const delay = getDeleteDelay();
+    const delay = botConfig.options.messageManagement?.deleteDelay || 2000;
     
     setTimeout(async () => {
       try {

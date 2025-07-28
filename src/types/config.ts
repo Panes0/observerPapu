@@ -54,6 +54,42 @@ export interface BotConfigOptions {
     showProgress: boolean;          // Show download progress
     showExtractorName: boolean;     // Show "Downloading from YouTube..."
   };
+  
+  // Video processing configuration (ffmpeg optimization)
+  videoProcessing: {
+    enabled: boolean;            // Enable video optimization for Telegram
+    faststart: boolean;          // Move metadata to beginning (fixes Telegram previews)
+    reencodeVideos: boolean;     // Force reencode videos (slower but more compatible)
+    maxResolution: {             // Maximum video resolution
+      width: number;
+      height: number;
+    };
+    compressionLevel: number;    // CRF value (0-51, lower = better quality)
+    maxFileSize: number;         // Maximum output file size in bytes
+    maxDuration: number;         // Maximum video duration in seconds
+    skipOptimizationForSmallFiles: boolean; // Skip optimization for files < 5MB
+    showProcessingProgress: boolean;        // Show video processing progress
+  };
+  
+  // Video cache configuration
+  videoCache: {
+    showCacheIndicator: boolean; // Show "🔄 Contenido desde caché" or copy exactly
+  };
+  
+  // User attribution configuration
+  userAttribution: {
+    enabled: boolean;            // Show who requested the content
+    emoji: string;               // Emoji to use for attribution
+    showUsername: boolean;       // Show @username if available
+    showFirstName: boolean;      // Show first name
+    position: 'top' | 'bottom'; // Where to show the attribution
+  };
+  
+  // Message management configuration
+  messageManagement: {
+    autoDeleteOriginalMessage: boolean; // Delete original URL message after processing
+    deleteDelay: number;                // Delay in milliseconds before deleting (default: 2000)
+  };
 }
 
 export interface BotConfig {
