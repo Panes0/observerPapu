@@ -1,10 +1,13 @@
-import { Bot, Context } from "grammy";
+import { Bot, Context, InputFile } from "grammy";
+import * as fs from 'fs';
 import { SocialMediaHandler } from "./src/bot/handlers/social-media-handler";
 import { registerSocialMediaCommands } from "./src/bot/commands/social-media-commands";
 import { isSocialMediaUrl, extractUrls, isProcessableUrl } from "./src/utils/url-utils";
 import { botConfig } from "./config/bot.config";
 import { imageSearchService } from "./src/services/image-search";
-import { formatImageResult, formatImageError, formatNoImagesFound, getImageSearchHelp } from "./src/utils/image-utils";
+import { formatImageResult, formatImageError, formatNoImagesFound, getImageSearchHelp, formatDownloadedImageResult, formatImageCacheStats } from "./src/utils/image-utils";
+import { imageCacheService } from "./src/services/image-cache";
+import { imageDownloadService } from "./src/services/download/image-download-service";
 import { aiService, configureAIService, memoryService } from "./src/services/ai";
 import { configureDownloadService, getDownloadService } from "./src/services/download";
 import { 
@@ -448,18 +451,19 @@ bot.command("img", async (ctx) => {
 
     // Buscar imagen aleatoria
     const imageResult = await imageSearchService.getRandomImage(query, {
-      maxResults: 50,
-      safeSearch: 'moderate'
+      maxResults: 20,
+      safeSearch: 'off',
+      region: 'wt-wt'
     });
 
-    // Eliminar mensaje de carga
-    try {
-      await ctx.api.deleteMessage(ctx.chat.id, loadingMessage.message_id);
-    } catch (error) {
-      console.log('No se pudo eliminar el mensaje de carga:', error);
-    }
-
     if (!imageResult) {
+      // Eliminar mensaje de carga
+      try {
+        await ctx.api.deleteMessage(ctx.chat.id, loadingMessage.message_id);
+      } catch (error) {
+        console.log('No se pudo eliminar el mensaje de carga:', error);
+      }
+
       const noResultsMessage = formatNoImagesFound(query);
       await ctx.reply(noResultsMessage.message, {
         parse_mode: "HTML",
@@ -468,18 +472,142 @@ bot.command("img", async (ctx) => {
       return;
     }
 
-    // Formatear el resultado
-    const formattedResult = formatImageResult(imageResult, query);
+    // Verificar si el download de imágenes está habilitado
+    if (!botConfig.options.enableImageDownload || !botConfig.options.imageDownload.enabled) {
+      // Eliminar mensaje de carga
+      try {
+        await ctx.api.deleteMessage(ctx.chat.id, loadingMessage.message_id);
+      } catch (error) {
+        console.log('No se pudo eliminar el mensaje de carga:', error);
+      }
+
+      // Usar método original (solo URL)
+      const formattedResult = formatImageResult(imageResult, query);
+      await ctx.reply(formattedResult.message, {
+        parse_mode: "HTML",
+        disable_notification: botConfig.options.silentReplies,
+      });
+
+      if (botConfig.options.logMessages) {
+        console.log(`🖼️ Imagen (URL) encontrada para "${query}" por ${ctx.from?.first_name} (${ctx.from?.id})`);
+      }
+      return;
+    }
+
+    // Verificar si la imagen está en caché
+    const cachedEntry = imageCacheService.getCachedEntry(imageResult.url);
     
-    // Enviar un solo mensaje con toda la información y la URL para que Telegram muestre el preview
-    await ctx.reply(formattedResult.message, {
+    if (cachedEntry) {
+      // Eliminar mensaje de carga
+      try {
+        await ctx.api.deleteMessage(ctx.chat.id, loadingMessage.message_id);
+      } catch (error) {
+        console.log('No se pudo eliminar el mensaje de carga:', error);
+      }
+
+      // Enviar imagen desde caché
+      const showCacheIndicator = botConfig.options.imageDownload.showCacheIndicator;
+      const formattedResult = formatDownloadedImageResult(
+        cachedEntry.filePath,
+        query,
+        showCacheIndicator,
+        {
+          fileSize: cachedEntry.fileSize,
+          contentType: cachedEntry.contentType,
+          width: cachedEntry.width,
+          height: cachedEntry.height,
+          title: cachedEntry.title
+        }
+      );
+
+      const sentMessage = await ctx.replyWithPhoto(new InputFile(fs.createReadStream(cachedEntry.filePath)), {
+        caption: formattedResult.message,
+        parse_mode: "HTML",
+        disable_notification: botConfig.options.silentReplies,
+      });
+
+      // Log de la búsqueda
+      if (botConfig.options.logMessages) {
+        console.log(`🖼️ Imagen desde caché para "${query}" por ${ctx.from?.first_name} (${ctx.from?.id})`);
+      }
+
+      return;
+    }
+
+    // Actualizar mensaje de carga
+    try {
+      await ctx.api.editMessageText(ctx.chat.id, loadingMessage.message_id, "📥 Descargando imagen...");
+    } catch (error) {
+      console.log('No se pudo actualizar el mensaje de carga:', error);
+    }
+
+    // Descargar imagen
+    const downloadResult = await imageDownloadService.downloadImage(imageResult.url);
+
+    // Eliminar mensaje de carga
+    try {
+      await ctx.api.deleteMessage(ctx.chat.id, loadingMessage.message_id);
+    } catch (error) {
+      console.log('No se pudo eliminar el mensaje de carga:', error);
+    }
+
+    if (!downloadResult.success || !downloadResult.filePath) {
+      // Fallar silenciosamente y enviar el enlace original como fallback
+      const formattedResult = formatImageResult(imageResult, query);
+      await ctx.reply(formattedResult.message, {
+        parse_mode: "HTML",
+        disable_notification: botConfig.options.silentReplies,
+      });
+      
+      if (botConfig.options.logMessages) {
+        console.log(`⚠️ Descarga falló para "${query}", usando fallback URL. Error: ${downloadResult.error}`);
+      }
+      return;
+    }
+
+    // Enviar imagen descargada
+    const formattedResult = formatDownloadedImageResult(
+      downloadResult.filePath,
+      query,
+      false,
+      {
+        fileSize: downloadResult.fileSize,
+        contentType: downloadResult.contentType,
+        width: downloadResult.width,
+        height: downloadResult.height,
+        title: imageResult.title
+      }
+    );
+
+    const sentMessage = await ctx.replyWithPhoto(new InputFile(fs.createReadStream(downloadResult.filePath)), {
+      caption: formattedResult.message,
       parse_mode: "HTML",
       disable_notification: botConfig.options.silentReplies,
     });
 
+    // Guardar en caché
+    imageCacheService.addEntry(
+      imageResult.url,
+      downloadResult.filePath,
+      query,
+      {
+        messageId: sentMessage.message_id,
+        chatId: ctx.chat.id,
+        fileSize: downloadResult.fileSize,
+        contentType: downloadResult.contentType,
+        width: downloadResult.width,
+        height: downloadResult.height,
+        title: imageResult.title
+      }
+    );
+
+    // Limpiar archivo temporal después de enviar (opcional, podemos mantenerlo para el caché)
+    // imageDownloadService.cleanupFile(downloadResult.filePath);
+
     // Log de la búsqueda
     if (botConfig.options.logMessages) {
-      console.log(`🖼️ Imagen encontrada para "${query}" por ${ctx.from?.first_name} (${ctx.from?.id})`);
+      const sizeKB = downloadResult.fileSize ? Math.round(downloadResult.fileSize / 1024) : 0;
+      console.log(`🖼️ Imagen descargada para "${query}" por ${ctx.from?.first_name} (${ctx.from?.id}) - ${sizeKB}KB`);
     }
 
   } catch (error) {
@@ -986,6 +1114,101 @@ bot.command("video_cache_cleanup", async (ctx) => {
   } catch (error) {
     console.error('Error en limpieza del caché:', error);
     await ctx.reply("❌ Error en limpieza del caché", {
+      disable_notification: botConfig.options.silentReplies,
+    });
+  }
+});
+
+// Comando para mostrar estadísticas del caché de imágenes
+bot.command("image_cache_stats", async (ctx) => {
+  const isAuthorized = await isUserAuthorized(ctx);
+  if (!isAuthorized) {
+    return;
+  }
+  
+  try {
+    const stats = imageCacheService.getStats();
+    const message = formatImageCacheStats(stats);
+    
+    await ctx.reply(message, {
+      parse_mode: "HTML",
+      disable_notification: botConfig.options.silentReplies,
+    });
+    
+  } catch (error) {
+    console.error('Error obteniendo estadísticas del caché de imágenes:', error);
+    await ctx.reply("❌ Error obteniendo estadísticas del caché de imágenes", {
+      disable_notification: botConfig.options.silentReplies,
+    });
+  }
+});
+
+// Comando para limpiar el caché de imágenes
+bot.command("image_cache_clear", async (ctx) => {
+  const isAuthorized = await isUserAuthorized(ctx);
+  if (!isAuthorized) {
+    return;
+  }
+  
+  try {
+    // Solo el owner puede limpiar completamente el caché
+    const userId = ctx.from?.id;
+    const isOwner = userId === botConfig.options.ownerId;
+    
+    if (!isOwner) {
+      await ctx.reply("❌ Solo el owner puede limpiar el caché completamente", {
+        disable_notification: botConfig.options.silentReplies,
+      });
+      return;
+    }
+    
+    const statsBefore = imageCacheService.getStats();
+    imageCacheService.clearCache();
+    
+    await ctx.reply(`🗑️ <b>Caché de imágenes limpiado</b>\n\nSe eliminaron ${statsBefore.totalEntries} entradas del caché.`, {
+      parse_mode: "HTML",
+      disable_notification: botConfig.options.silentReplies,
+    });
+    
+  } catch (error) {
+    console.error('Error limpiando caché de imágenes:', error);
+    await ctx.reply("❌ Error limpiando caché de imágenes", {
+      disable_notification: botConfig.options.silentReplies,
+    });
+  }
+});
+
+// Comando para limpiar entradas antiguas del caché de imágenes
+bot.command("image_cache_cleanup", async (ctx) => {
+  const isAuthorized = await isUserAuthorized(ctx);
+  if (!isAuthorized) {
+    return;
+  }
+  
+  try {
+    const cleanupDays = botConfig.options.imageDownload.cleanupAfterDays || 30;
+    
+    // Limpiar entradas más antiguas que los días configurados
+    const removedCount = await imageCacheService.cleanup({
+      olderThanDays: cleanupDays,
+      maxEntries: 1000,
+      invalidateFileChecks: true
+    });
+    
+    if (removedCount > 0) {
+      await ctx.reply(`🧹 <b>Limpieza de caché de imágenes completada</b>\n\nSe eliminaron ${removedCount} entradas antiguas (>${cleanupDays} días).`, {
+        parse_mode: "HTML",
+        disable_notification: botConfig.options.silentReplies,
+      });
+    } else {
+      await ctx.reply("✅ No se encontraron entradas antiguas para eliminar", {
+        disable_notification: botConfig.options.silentReplies,
+      });
+    }
+    
+  } catch (error) {
+    console.error('Error en limpieza del caché de imágenes:', error);
+    await ctx.reply("❌ Error en limpieza del caché de imágenes", {
       disable_notification: botConfig.options.silentReplies,
     });
   }

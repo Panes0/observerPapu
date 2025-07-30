@@ -3,6 +3,7 @@ export interface BotConfigOptions {
   enableSocialMedia: boolean;
   enableAI: boolean;
   enableDownloadFallback: boolean;
+  enableImageDownload: boolean;
   
   // Bot behavior settings
   silentReplies: boolean;
@@ -89,6 +90,18 @@ export interface BotConfigOptions {
   messageManagement: {
     autoDeleteOriginalMessage: boolean; // Delete original URL message after processing
     deleteDelay: number;                // Delay in milliseconds before deleting (default: 2000)
+  };
+  
+  // Image download configuration
+  imageDownload: {
+    enabled: boolean;            // Enable image downloading and caching
+    maxFileSize: number;         // Maximum image file size in bytes (10MB default)
+    allowedTypes: string[];      // Allowed MIME types
+    tempDir: string;             // Temporary download directory
+    cacheDir: string;            // Cache directory
+    timeout: number;             // Download timeout in milliseconds
+    showCacheIndicator: boolean; // Show when image is from cache
+    cleanupAfterDays: number;    // Days to keep cached images
   };
 }
 

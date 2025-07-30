@@ -1,4 +1,5 @@
 import { ImageSearchResult, FormattedImageResult } from '../types/image-search';
+import { ImageCacheEntry } from '../types/image-cache';
 
 /**
  * Formatea un resultado de búsqueda de imagen para Telegram
@@ -136,6 +137,121 @@ export function formatImageTitle(title: string, maxLength: number = 50): string 
 }
 
 /**
+ * Formatea un resultado de imagen descargada para Telegram
+ */
+export interface FormattedDownloadedImageResult {
+  message: string;
+  filePath: string;
+  query: string;
+  success: boolean;
+  fromCache: boolean;
+}
+
+/**
+ * Formatea un resultado de imagen descargada
+ */
+export function formatDownloadedImageResult(
+  filePath: string, 
+  query: string, 
+  fromCache: boolean = false,
+  metadata?: {
+    fileSize?: number;
+    contentType?: string;
+    width?: number;
+    height?: number;
+    title?: string;
+  }
+): FormattedDownloadedImageResult {
+  let message = `🖼️ <b>"${query}"</b>`;
+  
+  if (fromCache) {
+    message += `\n💾 <i>Imagen desde caché</i>`;
+  }
+  
+  if (metadata) {
+    if (metadata.width && metadata.height) {
+      const dimensions = formatImageDimensions(metadata.width, metadata.height);
+      message += `\n📐 ${dimensions}`;
+    }
+    
+    if (metadata.fileSize) {
+      const sizeKB = Math.round(metadata.fileSize / 1024);
+      message += `\n📦 ${sizeKB}KB`;
+    }
+  }
+
+  return {
+    message,
+    filePath,
+    query,
+    success: true,
+    fromCache
+  };
+}
+
+/**
+ * Formatea información de una entrada de caché
+ */
+export function formatCacheEntryInfo(entry: ImageCacheEntry): string {
+  let info = `🖼️ <b>${entry.query}</b>\n`;
+  info += `🔗 <a href="${entry.url}">Fuente original</a>\n`;
+  
+  if (entry.width && entry.height) {
+    const dimensions = formatImageDimensions(entry.width, entry.height);
+    info += `📐 ${dimensions}\n`;
+  }
+  
+  if (entry.fileSize) {
+    const sizeKB = Math.round(entry.fileSize / 1024);
+    info += `📦 ${sizeKB}KB\n`;
+  }
+  
+  if (entry.contentType) {
+    info += `📄 ${entry.contentType}\n`;
+  }
+  
+  const date = new Date(entry.timestamp);
+  info += `📅 ${date.toLocaleDateString()} ${date.toLocaleTimeString()}`;
+  
+  return info;
+}
+
+/**
+ * Genera estadísticas del caché de imágenes
+ */
+export function formatImageCacheStats(stats: any): string {
+  let message = `🖼️ <b>Estadísticas del Caché de Imágenes</b>\n\n`;
+  message += `📊 <b>General:</b>\n`;
+  message += `• <b>Imágenes cacheadas:</b> ${stats.totalEntries}\n`;
+  message += `• <b>Cache hits:</b> ${stats.cacheHits}\n`;
+  message += `• <b>Cache misses:</b> ${stats.cacheMisses}\n`;
+  message += `• <b>Ratio de aciertos:</b> ${(stats.hitRatio * 100).toFixed(1)}%\n`;
+  message += `• <b>Tamaño total:</b> ${stats.totalSize > 0 ? (stats.totalSize / (1024 * 1024)).toFixed(1) + ' MB' : 'N/A'}\n\n`;
+  
+  if (Object.keys(stats.contentTypeStats).length > 0) {
+    message += `📄 <b>Por tipo de archivo:</b>\n`;
+    Object.entries(stats.contentTypeStats)
+      .sort(([,a], [,b]) => (b as number) - (a as number))
+      .slice(0, 10)
+      .forEach(([type, count]) => {
+        const displayType = type.replace('image/', '');
+        message += `• ${displayType}: ${count}\n`;
+      });
+    message += `\n`;
+  }
+  
+  if (stats.oldestEntry > 0) {
+    const oldestDate = new Date(stats.oldestEntry);
+    const newestDate = new Date(stats.newestEntry);
+    message += `📅 <b>Fechas:</b>\n`;
+    message += `• <b>Más antiguo:</b> ${oldestDate.toLocaleDateString()}\n`;
+    message += `• <b>Más reciente:</b> ${newestDate.toLocaleDateString()}\n`;
+  }
+  
+  return message;
+}
+
+/**
  * Genera un mensaje de ayuda para el comando /img
  */
 export function getImageSearchHelp(): string {
@@ -149,8 +265,8 @@ export function getImageSearchHelp(): string {
          `• <code>/img tecnología</code>\n\n` +
          `<b>Características:</b>\n` +
          `• Búsqueda en DuckDuckGo\n` +
-         `• Resultados aleatorios\n` +
-         `• Enlaces directos a imágenes\n` +
-         `• Información de dimensiones\n\n` +
-         `<b>Nota:</b> El bot envía la URL de la imagen para que Telegram muestre el preview automáticamente.`;
+         `• Descarga y envío directo de imágenes\n` +
+         `• Caché para acceso rápido\n` +
+         `• Información de dimensiones y tamaño\n\n` +
+         `<b>Nota:</b> El bot descarga y envía la imagen directamente, garantizando que siempre se muestre correctamente.`;
 } 

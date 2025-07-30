@@ -1,0 +1,1 @@
+export { ImageCacheService, imageCacheService } from './image-cache-service';
