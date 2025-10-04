@@ -9,6 +9,7 @@ export interface SocialMediaPost {
   likes?: number;
   shares?: number;
   comments?: number;
+  originalPost?: SocialMediaPost; // For replies, this contains the original post
 }
 
 export interface MediaItem {

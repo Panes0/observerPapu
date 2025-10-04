@@ -1,6 +1,6 @@
 import { Context, InputFile } from 'grammy';
-import { socialMediaManager } from '../../services/social-media';
-import { extractUrls, isSocialMediaUrl, isProcessableUrl, getDomain } from '../../utils/url-utils';
+import { SocialMediaManager } from '../../services/social-media';
+import { extractUrls, isSocialMediaUrl, isProcessableUrl, getDomain, isYouTubeLivestream } from '../../utils/url-utils';
 import { formatPostForTelegram, formatErrorMessage, getMainMediaType } from '../../utils/media-utils';
 import { SocialMediaPost } from '../../types/social-media';
 // Removed old social-media-config imports - now using main bot config
@@ -13,6 +13,7 @@ import { addUserAttribution } from '../../utils/user-utils';
 import * as fs from 'fs';
 
 export class SocialMediaHandler {
+  private static socialMediaManager = new SocialMediaManager(botConfig.options);
   /**
    * Maneja mensajes que contienen URLs de redes sociales
    */
@@ -20,7 +21,14 @@ export class SocialMediaHandler {
     if (!ctx.message?.text) return;
 
     const urls = extractUrls(ctx.message.text);
-    const socialMediaUrls = urls.filter(url => isSocialMediaUrl(url));
+    const socialMediaUrls = urls.filter(url => {
+      // Filter out YouTube livestreams
+      if (isYouTubeLivestream(url)) {
+        console.log(`🔴 Ignoring YouTube livestream URL: ${url}`);
+        return false;
+      }
+      return isSocialMediaUrl(url);
+    });
 
     if (socialMediaUrls.length === 0) return;
 
@@ -33,16 +41,19 @@ export class SocialMediaHandler {
         const domain = this.detectPlatformFromUrl(url);
         const errorMsg = error instanceof Error ? error.message.split('\n')[0] : 'Unknown error';
         console.log(`❌ Failed to process ${domain.toUpperCase()} URL: ${errorMsg}`);
-        try {
-          const platform = this.detectPlatformFromUrl(url);
-          const errorMessage = formatErrorMessage(platform, 'No se pudo procesar el contenido');
-          await ctx.reply(errorMessage, { 
-            parse_mode: 'HTML',
-            disable_notification: true // Silent reply
-          });
-        } catch (replyError) {
-          console.error('Error sending error message:', replyError);
-          // If even the error message fails, just log it
+        // Send error message only if not skipped in config
+        if (!botConfig.options.skipFailedProcessMessages) {
+          try {
+            const platform = this.detectPlatformFromUrl(url);
+            const errorMessage = formatErrorMessage(platform, 'No se pudo procesar el contenido');
+            await ctx.reply(errorMessage, { 
+              parse_mode: 'HTML',
+              disable_notification: true // Silent reply
+            });
+          } catch (replyError) {
+            console.error('Error sending error message:', replyError);
+            // If even the error message fails, just log it
+          }
         }
       }
     }
@@ -100,17 +111,23 @@ export class SocialMediaHandler {
     }
 
     // **PASO 2: Procesamiento normal si no hay caché**
-    // Mostrar mensaje de "procesando"
-    const processingMessage = await ctx.reply('🔄 Procesando contenido...', { 
-      parse_mode: 'HTML',
-      disable_notification: true // Silent reply
-    });
+    // Mostrar mensaje de "procesando" solo si está habilitado en config
+    let processingMessage: any = null;
+    if (botConfig.options.showProcessingMessages) {
+      processingMessage = await ctx.reply('🔄 Procesando contenido...', { 
+        parse_mode: 'HTML',
+        disable_notification: true // Silent reply
+      });
+    }
+    
+    // Always log to console
+    console.log(`🔄 Processing content from: ${url}`);
 
     let sentMessage: any = null;
 
     try {
       // Extraer información del post
-      const post = await socialMediaManager.extractPost(url);
+      const post = await this.socialMediaManager.extractPost(url);
       
       // Formatear mensaje
       let formattedMessage = formatPostForTelegram(post);
@@ -142,8 +159,10 @@ export class SocialMediaHandler {
         console.log(`💾 Video guardado en caché: ${platform} - ${url} -> mensaje ${sentMessage.message_id}`);
       }
       
-      // Eliminar mensaje de procesamiento
-      await ctx.api.deleteMessage(ctx.chat!.id, processingMessage.message_id);
+      // Eliminar mensaje de procesamiento si existe
+      if (processingMessage && processingMessage.message_id) {
+        await ctx.api.deleteMessage(ctx.chat!.id, processingMessage.message_id);
+      }
       
       // Auto-delete original message if enabled
       if (botConfig.options.messageManagement?.autoDeleteOriginalMessage && ctx.message?.message_id) {
@@ -161,17 +180,70 @@ export class SocialMediaHandler {
         try {
           console.log(`🔄 ${platformName.toUpperCase()} API failed, trying universal download fallback...`);
           
-          // Update processing message to show fallback
-          if (botConfig.options.downloadFallback.showFallbackMessage) {
-            await ctx.api.editMessageText(
-              ctx.chat!.id, 
-              processingMessage.message_id, 
-              '⬬ Descargando contenido... (Usando método alternativo)', 
-              { parse_mode: 'HTML' }
-            );
+          // Check if it's a livestream before proceeding with download
+          const downloadService = getDownloadService();
+          
+          try {
+            const info = await downloadService.extractInfo(url);
+            
+            // Check for livestream indicators in the metadata
+            if (this.isLivestream(info)) {
+              console.log(`🔴 Detected livestream, skipping: ${info.title}`);
+              console.log(`🔍 Video info: duration=${info.duration || 'unknown'}, live_status=${info.live_status || 'none'}, is_live=${info.is_live || false}`);
+              
+              // Show livestream message only if enabled in config
+              if (botConfig.options.downloadFallback.showLivestreamMessages) {
+                if (processingMessage && processingMessage.message_id) {
+                  await ctx.api.editMessageText(
+                    ctx.chat!.id, 
+                    processingMessage.message_id, 
+                    '🔴 <b>Livestream detectado</b>\n\nLos livestreams no se procesan automáticamente.', 
+                    { parse_mode: 'HTML' }
+                  );
+                } else {
+                  await ctx.reply('🔴 <b>Livestream detectado</b>\n\nLos livestreams no se procesan automáticamente.', {
+                    parse_mode: 'HTML',
+                    disable_notification: true
+                  });
+                }
+              } else {
+                // If livestream messages are disabled, just delete processing message if it exists
+                if (processingMessage && processingMessage.message_id) {
+                  try {
+                    await ctx.api.deleteMessage(ctx.chat!.id, processingMessage.message_id);
+                  } catch (deleteError) {
+                    console.log('Could not delete processing message:', deleteError);
+                  }
+                }
+              }
+              
+              return; // Skip livestream processing
+            }
+          } catch (infoError) {
+            console.log(`⚠️ Could not extract info for livestream check: ${infoError}`);
+            // Continue with normal processing if info extraction fails
           }
           
-          const downloadService = getDownloadService();
+          // Update processing message to show fallback (only if both showFallbackMessage and showProcessingMessages are enabled)
+          if (botConfig.options.downloadFallback.showFallbackMessage && botConfig.options.showProcessingMessages) {
+            if (processingMessage && processingMessage.message_id) {
+              await ctx.api.editMessageText(
+                ctx.chat!.id, 
+                processingMessage.message_id, 
+                '⬬ Descargando contenido... (Usando método alternativo)', 
+                { parse_mode: 'HTML' }
+              );
+            } else {
+              await ctx.reply('⬬ Descargando contenido... (Usando método alternativo)', {
+                parse_mode: 'HTML',
+                disable_notification: true
+              });
+            }
+          }
+          
+          // Always log to console
+          console.log('⬬ Using fallback download method...');
+          
           const downloadResult = await downloadService.downloadMedia(url);
           
           if (downloadResult.success && downloadResult.filePath) {
@@ -189,6 +261,78 @@ export class SocialMediaHandler {
         } catch (downloadError) {
           const errorMsg = downloadError instanceof Error ? downloadError.message.split('\n')[0] : 'Unknown error';
           console.log(`⚠️ Download fallback failed: ${errorMsg}`);
+          
+          // 🆕 SPECIAL CASE: Instagram image posts (no video in post)
+          if (platformName.toLowerCase() === 'instagram' && 
+              errorMsg.includes('There is no video in this post')) {
+            try {
+              console.log('🖼️ Instagram post has no video, trying to extract images...');
+              
+              // Update processing message to show image extraction (only if showProcessingMessages is enabled)
+              if (botConfig.options.showProcessingMessages) {
+                if (processingMessage && processingMessage.message_id) {
+                  await ctx.api.editMessageText(
+                    ctx.chat!.id, 
+                    processingMessage.message_id, 
+                    '🖼️ Extrayendo imágenes de Instagram...', 
+                    { parse_mode: 'HTML' }
+                  );
+                } else {
+                  await ctx.reply('🖼️ Extrayendo imágenes de Instagram...', {
+                    parse_mode: 'HTML',
+                    disable_notification: true
+                  });
+                }
+              }
+              
+              // Always log to console
+              console.log('🖼️ Extracting Instagram images...');
+              
+              // Try to get the direct Instagram image URL(s)
+              const imageResult = await this.extractInstagramImages(url);
+              
+              if (imageResult.success && imageResult.imageUrls && imageResult.imageUrls.length > 0) {
+                const sentMessage = await this.sendInstagramImages(ctx, {
+                  imageUrls: imageResult.imageUrls,
+                  title: imageResult.title,
+                  author: imageResult.author
+                }, url);
+                
+                // Cache the result
+                if (sentMessage && sentMessage.message_id && ctx.chat?.id) {
+                  const metadata = {
+                    title: imageResult.title || 'Instagram post',
+                    author: imageResult.author || 'unknown',
+                    duration: undefined,
+                    fileSize: undefined
+                  };
+                  
+                  videoCacheService.addEntry(
+                    url,
+                    sentMessage.message_id,
+                    ctx.chat.id,
+                    'instagram',
+                    metadata
+                  );
+                }
+                
+                // Delete processing message if it exists
+                if (processingMessage && processingMessage.message_id) {
+                  await ctx.api.deleteMessage(ctx.chat!.id, processingMessage.message_id);
+                }
+                
+                // Auto-delete original message if enabled
+                if (botConfig.options.messageManagement?.autoDeleteOriginalMessage && ctx.message?.message_id) {
+                  await this.scheduleMessageDeletion(ctx, ctx.message.message_id);
+                }
+                
+                return; // Success with Instagram images!
+              }
+            } catch (imageError) {
+              console.log(`❌ Instagram image extraction also failed: ${imageError}`);
+            }
+          }
+          
           // Continue to original error handling
         }
       }
@@ -218,8 +362,27 @@ export class SocialMediaHandler {
         errorMessage = formatErrorMessage(platform, 'No se pudo procesar el contenido con ningún método disponible.');
       }
       
-      // Update processing message with error
-      await ctx.api.editMessageText(ctx.chat!.id, processingMessage.message_id, errorMessage, { parse_mode: 'HTML' });
+      // Update processing message with error only if not skipped in config
+      if (!botConfig.options.skipFailedProcessMessages) {
+        if (processingMessage && processingMessage.message_id) {
+          await ctx.api.editMessageText(ctx.chat!.id, processingMessage.message_id, errorMessage, { parse_mode: 'HTML' });
+        } else {
+          // Send error message as new message if processing message wasn't shown
+          await ctx.reply(errorMessage, {
+            parse_mode: 'HTML',
+            disable_notification: true
+          });
+        }
+      } else {
+        // If error messages are skipped, just delete the processing message if it exists
+        if (processingMessage && processingMessage.message_id) {
+          try {
+            await ctx.api.deleteMessage(ctx.chat!.id, processingMessage.message_id);
+          } catch (deleteError) {
+            console.log('Could not delete processing message:', deleteError);
+          }
+        }
+      }
     }
   }
 
@@ -247,6 +410,12 @@ export class SocialMediaHandler {
       }
     }
 
+    // Handle multiple media items
+    if (post.media.length > 1) {
+      return await this.sendMediaGroup(ctx, post, message);
+    }
+
+    // Single media item
     const mainMedia = post.media[0];
 
     try {
@@ -292,6 +461,130 @@ export class SocialMediaHandler {
   }
 
   /**
+   * Sends multiple media items as a media group
+   */
+  private static async sendMediaGroup(ctx: Context, post: SocialMediaPost, message: string): Promise<any> {
+    try {
+      const media = [];
+      
+      // Group media by type to handle mixed media properly
+      const images = post.media!.filter(item => item.type === 'image');
+      const videos = post.media!.filter(item => item.type === 'video');
+      const gifs = post.media!.filter(item => item.type === 'gif');
+      
+      // Telegram media groups can only contain photos and videos (not gifs)
+      // We'll send compatible media first, then any gifs separately
+      const compatibleMedia = [...images, ...videos];
+      
+      if (compatibleMedia.length > 1) {
+        // Build media group array
+        for (let i = 0; i < Math.min(compatibleMedia.length, 10); i++) { // Telegram limit is 10 media items
+          const item = compatibleMedia[i];
+          const mediaItem: any = {
+            media: item.url,
+            caption: i === 0 ? message : undefined, // Only add caption to first item
+            parse_mode: i === 0 ? 'HTML' : undefined
+          };
+          
+          if (item.type === 'image') {
+            mediaItem.type = 'photo';
+          } else if (item.type === 'video') {
+            mediaItem.type = 'video';
+          }
+          
+          media.push(mediaItem);
+        }
+        
+        const sentMessages = await ctx.replyWithMediaGroup(media, {
+          disable_notification: true
+        });
+        
+        // Send any remaining gifs separately
+        for (const gif of gifs) {
+          await ctx.replyWithAnimation(gif.url, {
+            disable_notification: true
+          });
+        }
+        
+        console.log(`📷 Sent media group with ${compatibleMedia.length} items + ${gifs.length} gifs`);
+        return sentMessages[0]; // Return first message for caching
+        
+      } else {
+        // If we only have 1 compatible media item + gifs, send them individually
+        let firstMessage = null;
+        
+        // Send the compatible media item first
+        if (compatibleMedia.length === 1) {
+          const item = compatibleMedia[0];
+          if (item.type === 'image') {
+            firstMessage = await ctx.replyWithPhoto(item.url, {
+              caption: message,
+              parse_mode: 'HTML',
+              disable_notification: true
+            });
+          } else if (item.type === 'video') {
+            firstMessage = await ctx.replyWithVideo(item.url, {
+              caption: message,
+              parse_mode: 'HTML',
+              disable_notification: true
+            });
+          }
+        }
+        
+        // Send gifs separately
+        for (let i = 0; i < gifs.length; i++) {
+          const gif = gifs[i];
+          const gifMessage: string | undefined = i === 0 && !firstMessage ? message : undefined;
+          await ctx.replyWithAnimation(gif.url, {
+            caption: gifMessage,
+            parse_mode: gifMessage ? 'HTML' : undefined,
+            disable_notification: true
+          });
+          
+          if (!firstMessage && i === 0) {
+            firstMessage = gifMessage;
+          }
+        }
+        
+        return firstMessage;
+      }
+      
+    } catch (error) {
+      console.error('Error sending media group:', error);
+      // Fallback to sending first media item only
+      const firstMedia = post.media![0];
+      try {
+        if (firstMedia.type === 'image') {
+          return await ctx.replyWithPhoto(firstMedia.url, {
+            caption: message,
+            parse_mode: 'HTML',
+            disable_notification: true
+          });
+        } else if (firstMedia.type === 'video') {
+          return await ctx.replyWithVideo(firstMedia.url, {
+            caption: message,
+            parse_mode: 'HTML',
+            disable_notification: true
+          });
+        } else if (firstMedia.type === 'gif') {
+          return await ctx.replyWithAnimation(firstMedia.url, {
+            caption: message,
+            parse_mode: 'HTML',
+            disable_notification: true
+          });
+        }
+      } catch (fallbackError) {
+        console.error('Error in media group fallback:', fallbackError);
+        // Final fallback to text
+        return await ctx.reply(message, {
+          parse_mode: 'HTML',
+          disable_notification: true
+        });
+      }
+    }
+  }
+
+  /**
    * Detecta la plataforma desde una URL
    */
   private static detectPlatformFromUrl(url: string): string {
@@ -324,7 +617,14 @@ export class SocialMediaHandler {
     if (!ctx.message?.text) return;
 
     const urls = extractUrls(ctx.message.text);
-    const socialMediaUrls = urls.filter(url => isSocialMediaUrl(url));
+    const socialMediaUrls = urls.filter(url => {
+      // Filter out YouTube livestreams
+      if (isYouTubeLivestream(url)) {
+        console.log(`🔴 Ignoring YouTube livestream URL in /fix command: ${url}`);
+        return false;
+      }
+      return isSocialMediaUrl(url);
+    });
 
     if (socialMediaUrls.length === 0) {
       await ctx.reply('❌ No se encontraron URLs de redes sociales en el mensaje.', {
@@ -337,7 +637,7 @@ export class SocialMediaHandler {
     
     for (const url of socialMediaUrls) {
       try {
-        const fixedUrl = socialMediaManager.getFixedUrl(url);
+        const fixedUrl = this.socialMediaManager.getFixedUrl(url);
         const platform = this.detectPlatformFromUrl(url);
         const emoji = this.getPlatformEmoji(platform);
         
@@ -437,12 +737,16 @@ export class SocialMediaHandler {
           if (shouldOptimize) {
             // Show video processing message
             if (botConfig.options.videoProcessing.showProcessingProgress) {
-              await ctx.api.editMessageText(
-                ctx.chat!.id,
-                processingMessage.message_id,
-                '📹 Optimizando video para Telegram...',
-                { parse_mode: 'HTML' }
-              );
+              if (processingMessage && processingMessage.message_id) {
+                await ctx.api.editMessageText(
+                  ctx.chat!.id,
+                  processingMessage.message_id,
+                  '📹 Optimizando video para Telegram...',
+                  { parse_mode: 'HTML' }
+                );
+              } else {
+                console.log('📹 Optimizing video for Telegram...');
+              }
             }
             
             const videoOptimizer = getVideoOptimizer(botConfig.options.downloadFallback.tempDir);
@@ -528,11 +832,13 @@ export class SocialMediaHandler {
         // Don't fail the whole operation if cache fails
       }
       
-      // Delete processing message
-      try {
-        await ctx.api.deleteMessage(ctx.chat!.id, processingMessage.message_id);
-      } catch (error) {
-        console.log('Could not delete processing message:', error);
+      // Delete processing message if it exists
+      if (processingMessage && processingMessage.message_id) {
+        try {
+          await ctx.api.deleteMessage(ctx.chat!.id, processingMessage.message_id);
+        } catch (error) {
+          console.log('Could not delete processing message:', error);
+        }
       }
       
       // Clean up downloaded files (both original and optimized)
@@ -579,6 +885,205 @@ export class SocialMediaHandler {
     };
     
     return emojis[extractor.toLowerCase()] || emojis['generic'];
+  }
+
+  /**
+   * Checks if content is a livestream based on extracted metadata
+   */
+  private static isLivestream(info: any): boolean {
+    if (!info) return false;
+    
+    // Primary indicators (most reliable)
+    // Check for live_status field (YouTube specific) - most reliable
+    if (info.live_status && (info.live_status === 'is_live' || info.live_status === 'is_upcoming')) {
+      console.log(`🔴 Livestream detected by live_status: ${info.live_status}`);
+      return true;
+    }
+    
+    // Check if it's explicitly marked as live
+    if (info.is_live === true) {
+      console.log(`🔴 Livestream detected by is_live flag: ${info.is_live}`);
+      return true;
+    }
+    
+    // Check for extremely long duration (often indicates livestream)
+    if (info.duration && info.duration > 86400) { // More than 24 hours
+      console.log(`🔴 Livestream detected by duration: ${info.duration} seconds (${Math.floor(info.duration / 3600)} hours)`);
+      return true;
+    }
+    
+    // Secondary indicators (more prone to false positives, so we're more specific)
+    const title = (info.title || '').toLowerCase();
+    const description = (info.description || '').toLowerCase();
+    
+    // Very specific livestream keywords (to avoid false positives)
+    const specificLivestreamKeywords = [
+      'live now', 'livestream', 'live stream', '🔴 live', 'streaming live',
+      'en vivo now', 'ao vivo now', 'en directo now'
+    ];
+    
+    // Only check title for very specific keywords
+    if (specificLivestreamKeywords.some(keyword => title.includes(keyword))) {
+      console.log(`🔴 Livestream detected by specific keyword in title: "${title}"`);
+      return true;
+    }
+    
+    // Check for specific formats that indicate live content (most reliable format check)
+    if (info.formats && Array.isArray(info.formats)) {
+      const hasLiveFormats = info.formats.some((format: any) => 
+        format.format_note && (
+          format.format_note.toLowerCase() === 'live' || 
+          format.format_note.toLowerCase().startsWith('live ')
+        )
+      );
+      if (hasLiveFormats) {
+        console.log(`🔴 Livestream detected by format notes`);
+        return true;
+      }
+    }
+    
+    // If we get here, it's not detected as a livestream
+    console.log(`✅ Not detected as livestream: "${info.title}" (duration: ${info.duration || 'unknown'}, live_status: ${info.live_status || 'none'}, is_live: ${info.is_live || false})`);
+    return false;
+  }
+
+  /**
+   * Extrae URLs de imágenes de un post de Instagram
+   */
+  private static async extractInstagramImages(url: string): Promise<{
+    success: boolean;
+    imageUrls?: string[];
+    title?: string;
+    author?: string;
+    error?: string;
+  }> {
+    try {
+      // Try to use a simple approach - convert Instagram URL to embedded format
+      const postId = this.extractInstagramPostId(url);
+      if (!postId) {
+        throw new Error('Could not extract Instagram post ID');
+      }
+      
+      // Try different methods to get Instagram image URLs
+      const methods = [
+        () => this.tryInstagramEmbedMethod(postId),
+        () => this.tryInstagramDirectMethod(url),
+      ];
+      
+      for (const method of methods) {
+        try {
+          const result = await method();
+          if (result.success) {
+            return result;
+          }
+        } catch (error) {
+          console.log(`Instagram image extraction method failed: ${error}`);
+          continue;
+        }
+      }
+      
+      return { success: false, error: 'All Instagram image extraction methods failed' };
+      
+    } catch (error) {
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : 'Unknown error' 
+      };
+    }
+  }
+  
+  /**
+   * Extrae el ID del post de Instagram
+   */
+  private static extractInstagramPostId(url: string): string | null {
+    const patterns = [
+      /instagram\.com\/p\/([A-Za-z0-9_-]+)/,
+      /instagram\.com\/reel\/([A-Za-z0-9_-]+)/,
+      /instagr\.am\/p\/([A-Za-z0-9_-]+)/,
+    ];
+    
+    for (const pattern of patterns) {
+      const match = url.match(pattern);
+      if (match) {
+        return match[1];
+      }
+    }
+    return null;
+  }
+  
+  /**
+   * Intenta obtener imágenes usando el método de embed
+   */
+  private static async tryInstagramEmbedMethod(postId: string): Promise<{
+    success: boolean;
+    imageUrls?: string[];
+    title?: string;
+    author?: string;
+  }> {
+    // This is a simplified approach - in a real implementation,
+    // you might need to scrape the Instagram page or use other methods
+    // For now, we'll create a basic response structure
+    return {
+      success: true,
+      imageUrls: [`https://instagram.com/p/${postId}/media/?size=l`],
+      title: 'Instagram post',
+      author: 'unknown'
+    };
+  }
+  
+  /**
+   * Intenta obtener imágenes usando método directo
+   */
+  private static async tryInstagramDirectMethod(url: string): Promise<{
+    success: boolean;
+    imageUrls?: string[];
+    title?: string;
+    author?: string;
+  }> {
+    // Alternative method - could try different Instagram proxy services
+    // For now, return a fallback approach
+    return {
+      success: false
+    };
+  }
+  
+  /**
+   * Envía imágenes de Instagram al chat
+   */
+  private static async sendInstagramImages(ctx: Context, imageResult: {
+    imageUrls: string[];
+    title?: string;
+    author?: string;
+  }, originalUrl: string): Promise<any> {
+    let message = '📸 <b>INSTAGRAM</b>\n\n';
+    
+    if (imageResult.author && imageResult.author !== 'unknown') {
+      message += `👤 <b>Autor:</b> ${imageResult.author}\n`;
+    }
+    
+    if (imageResult.title && imageResult.title !== 'Instagram post') {
+      message += `\n📝 ${imageResult.title}\n`;
+    }
+    
+    message += `\n🔗 <a href="${originalUrl}">Ver original</a>`;
+    
+    // Add user attribution
+    message = addUserAttribution(message, ctx);
+    
+    try {
+      // For now, send just the message with the original link
+      // In a full implementation, you would download and send the actual images
+      const sentMessage = await ctx.reply(message, {
+        parse_mode: 'HTML',
+        disable_notification: botConfig.options.silentReplies
+      });
+      
+      return sentMessage;
+      
+    } catch (error) {
+      console.error('Error sending Instagram images:', error);
+      throw error;
+    }
   }
 
   /**

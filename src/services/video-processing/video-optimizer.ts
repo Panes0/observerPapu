@@ -132,7 +132,7 @@ export class VideoOptimizer {
         // Verificar si necesita faststart
         const needsFaststart = options.faststart && !this.hasFaststart(metadata);
         
-        // Verificar resolución
+        // Verificar resolución (sin forzar aspect ratio)
         const needsResize = options.maxResolution && 
           (videoStream.width > options.maxResolution.width || 
            videoStream.height > options.maxResolution.height);
@@ -170,66 +170,108 @@ export class VideoOptimizer {
    */
   private processVideo(inputPath: string, outputPath: string, options: VideoOptimizationOptions): Promise<void> {
     return new Promise((resolve, reject) => {
-      let command = ffmpeg(inputPath);
-
-      // Configurar codec de video
-      command = command.videoCodec('libx264');
-
-      // Configurar calidad
-      if (options.crf) {
-        command = command.outputOptions(['-crf', options.crf.toString()]);
-      }
-
-      // Configurar resolución
-      if (options.maxResolution) {
-        const { width, height } = options.maxResolution;
-        command = command.size(`${width}x${height}`);
-      }
-
-      // Configurar duración
-      if (options.maxDuration) {
-        command = command.duration(options.maxDuration);
-      }
-
-      // Configurar faststart (mover metadatos al principio)
-      if (options.faststart) {
-        command = command.outputOptions(['-movflags', '+faststart']);
-      }
-
-      // Configurar preset para optimización
-      command = command.outputOptions([
-        '-preset', 'medium',
-        '-profile:v', 'high',
-        '-level', '4.0',
-        '-pix_fmt', 'yuv420p'
-      ]);
-
-      // Configurar audio
-      command = command.audioCodec('aac').audioBitrate('128k');
-
-      // Configurar formato de salida
-      command = command.format('mp4');
-
-      // Ejecutar procesamiento
-      command
-        .output(outputPath)
-        .on('start', (commandLine: string) => {
-          console.log('📹 Starting video optimization:', commandLine);
-        })
-        .on('progress', (progress: any) => {
-          if (progress.percent) {
-            process.stdout.write(`\r📹 Processing video: ${Math.round(progress.percent)}%`);
-          }
-        })
-        .on('end', () => {
-          console.log('\n✅ Video optimization completed');
-          resolve();
-        })
-        .on('error', (err: any) => {
-          console.log('\n❌ Video optimization failed:', err.message);
+      // First, get video metadata to determine aspect ratio
+      ffmpeg.ffprobe(inputPath, (err: any, metadata: any) => {
+        if (err) {
           reject(err);
-        })
-        .run();
+          return;
+        }
+
+        const videoStream = metadata.streams?.find((s: any) => s.codec_type === 'video');
+        if (!videoStream) {
+          reject(new Error('No video stream found'));
+          return;
+        }
+
+        let command = ffmpeg(inputPath);
+
+        // Configurar codec de video
+        command = command.videoCodec('libx264');
+
+        // Configurar calidad
+        if (options.crf) {
+          command = command.outputOptions(['-crf', options.crf.toString()]);
+        }
+
+        // Configurar resolución respetando aspect ratio
+        if (options.maxResolution) {
+          const originalWidth = videoStream.width;
+          const originalHeight = videoStream.height;
+          const { width: maxWidth, height: maxHeight } = options.maxResolution;
+          
+          // Calculate aspect ratio preserving dimensions
+          const aspectRatio = originalWidth / originalHeight;
+          let targetWidth = originalWidth;
+          let targetHeight = originalHeight;
+          
+          // Only resize if video exceeds max resolution
+          if (originalWidth > maxWidth || originalHeight > maxHeight) {
+            if (aspectRatio > 1) {
+              // Landscape video: limit by width
+              targetWidth = Math.min(maxWidth, originalWidth);
+              targetHeight = Math.round(targetWidth / aspectRatio);
+            } else {
+              // Portrait video: limit by height
+              targetHeight = Math.min(maxHeight, originalHeight);
+              targetWidth = Math.round(targetHeight * aspectRatio);
+            }
+            
+            // Ensure dimensions are even (required for h264)
+            targetWidth = targetWidth % 2 === 0 ? targetWidth : targetWidth - 1;
+            targetHeight = targetHeight % 2 === 0 ? targetHeight : targetHeight - 1;
+            
+            console.log(`📹 Resizing video: ${originalWidth}x${originalHeight} → ${targetWidth}x${targetHeight} (preserving aspect ratio)`);
+            command = command.size(`${targetWidth}x${targetHeight}`);
+          } else {
+            console.log(`📹 Video already within resolution limits: ${originalWidth}x${originalHeight}`);
+          }
+        }
+
+        // Configurar duración
+        if (options.maxDuration) {
+          command = command.duration(options.maxDuration);
+        }
+
+        // Configurar faststart (mover metadatos al principio)
+        if (options.faststart) {
+          command = command.outputOptions(['-movflags', '+faststart']);
+        }
+
+        // Configurar preset para optimización
+        command = command.outputOptions([
+          '-preset', 'medium',
+          '-profile:v', 'high',
+          '-level', '4.0',
+          '-pix_fmt', 'yuv420p'
+        ]);
+
+        // Configurar audio
+        command = command.audioCodec('aac').audioBitrate('128k');
+
+        // Configurar formato de salida
+        command = command.format('mp4');
+
+        // Ejecutar procesamiento
+        command
+          .output(outputPath)
+          .on('start', (commandLine: string) => {
+            console.log('📹 Starting video optimization:', commandLine);
+          })
+          .on('progress', (progress: any) => {
+            if (progress.percent) {
+              process.stdout.write(`\r📹 Processing video: ${Math.round(progress.percent)}%`);
+            }
+          })
+          .on('end', () => {
+            console.log('\n✅ Video optimization completed');
+            resolve();
+          })
+          .on('error', (err: any) => {
+            console.log('\n❌ Video optimization failed:', err.message);
+            reject(err);
+          })
+          .run();
+      });
     });
   }
 

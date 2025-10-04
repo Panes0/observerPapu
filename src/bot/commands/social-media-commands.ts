@@ -1,10 +1,14 @@
 import { Bot, Context } from 'grammy';
 import { SocialMediaHandler } from '../handlers/social-media-handler';
-import { socialMediaManager } from '../../services/social-media';
+import { SocialMediaManager } from '../../services/social-media';
+import { PlatformType } from '../../types/social-media';
 import { socialMediaConfig, isAutoDeleteEnabled, getDeleteDelay } from '../../config/social-media-config';
 import { getDownloadService, isDownloadServiceConfigured } from '../../services/download';
 import { botConfig } from '../../../config/bot.config';
 import { FileManager } from '../../services/download/file-manager';
+
+// Create social media manager instance
+const socialMediaManager = new SocialMediaManager(botConfig.options);
 
 // Helper function to check if user is owner
 function isOwner(ctx: Context): boolean {
@@ -53,7 +57,7 @@ Este bot puede procesar contenido de las siguientes plataformas:
 • Envía: https://tiktok.com/@usuario/video/123456789
 
 <b>Plataformas soportadas:</b>
-${socialMediaManager.getSupportedPlatforms().map(platform => {
+${socialMediaManager.getSupportedPlatforms().map((platform: PlatformType) => {
   const emojis: Record<string, string> = {
     twitter: '🐦',
     instagram: '📷', 

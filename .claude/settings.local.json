@@ -1,8 +1,30 @@
 {
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "permissions": {
     "allow": [
-      "WebFetch(domain:docs.anthropic.com)"
+      "WebFetch(domain:docs.anthropic.com)",
+      "Bash(npm run dev:*)",
+      "Bash(npm start)",
+      "WebFetch(domain:github.com)",
+      "Bash(timeout 30 npm run dev)",
+      "Bash(npx ts-node:*)",
+      "Bash(npx youtube-dl-exec:*)",
+      "Bash(rm:*)",
+      "Bash(npm update:*)",
+      "Bash(pip install:*)",
+      "Bash(gallery-dl:*)",
+      "Bash(python:*)",
+      "Bash(node:*)",
+      "Bash(npx tsc:*)",
+      "Bash(timeout 5 npm run dev)",
+      "WebFetch(domain:api.fxtwitter.com)",
+      "Bash(.\\node_modules\\.bin\\yt-dlp.exe:*)",
+      "Bash(.\\node_modules\\youtube-dl-exec\\bin\\yt-dlp.exe:*)",
+      "Bash(./node_modules/youtube-dl-exec/bin/yt-dlp.exe:*)"
     ],
-    "deny": []
+    "deny": [],
+    "additionalDirectories": [
+      "C:\\c\\Users\\Papu\\Documents\\Repo"
+    ]
   }
 }

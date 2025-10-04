@@ -2,7 +2,7 @@ import { Bot, Context, InputFile } from "grammy";
 import * as fs from 'fs';
 import { SocialMediaHandler } from "./src/bot/handlers/social-media-handler";
 import { registerSocialMediaCommands } from "./src/bot/commands/social-media-commands";
-import { isSocialMediaUrl, extractUrls, isProcessableUrl } from "./src/utils/url-utils";
+import { isSocialMediaUrl, extractUrls, isProcessableUrl, isYouTubeLivestream, isYouTubeChannel } from "./src/utils/url-utils";
 import { botConfig } from "./config/bot.config";
 import { imageSearchService } from "./src/services/image-search";
 import { formatImageResult, formatImageError, formatNoImagesFound, getImageSearchHelp, formatDownloadedImageResult, formatImageCacheStats } from "./src/utils/image-utils";
@@ -449,14 +449,14 @@ bot.command("img", async (ctx) => {
       disable_notification: botConfig.options.silentReplies,
     });
 
-    // Buscar imagen aleatoria
-    const imageResult = await imageSearchService.getRandomImage(query, {
-      maxResults: 20,
+    // Buscar múltiples imágenes para tener alternativas
+    const searchResponse = await imageSearchService.searchImages(query, {
+      maxResults: 10,
       safeSearch: 'off',
       region: 'wt-wt'
     });
 
-    if (!imageResult) {
+    if (!searchResponse.success || searchResponse.results.length === 0) {
       // Eliminar mensaje de carga
       try {
         await ctx.api.deleteMessage(ctx.chat.id, loadingMessage.message_id);
@@ -472,6 +472,9 @@ bot.command("img", async (ctx) => {
       return;
     }
 
+    // Randomizar las opciones para mayor variedad
+    const shuffledResults = [...searchResponse.results].sort(() => Math.random() - 0.5);
+
     // Verificar si el download de imágenes está habilitado
     if (!botConfig.options.enableImageDownload || !botConfig.options.imageDownload.enabled) {
       // Eliminar mensaje de carga
@@ -481,8 +484,9 @@ bot.command("img", async (ctx) => {
         console.log('No se pudo eliminar el mensaje de carga:', error);
       }
 
-      // Usar método original (solo URL)
-      const formattedResult = formatImageResult(imageResult, query);
+      // Usar método original (solo URL) con la primera imagen
+      const randomImage = shuffledResults[0];
+      const formattedResult = formatImageResult(randomImage, query);
       await ctx.reply(formattedResult.message, {
         parse_mode: "HTML",
         disable_notification: botConfig.options.silentReplies,
@@ -494,55 +498,87 @@ bot.command("img", async (ctx) => {
       return;
     }
 
-    // Verificar si la imagen está en caché
-    const cachedEntry = imageCacheService.getCachedEntry(imageResult.url);
-    
-    if (cachedEntry) {
-      // Eliminar mensaje de carga
-      try {
-        await ctx.api.deleteMessage(ctx.chat.id, loadingMessage.message_id);
-      } catch (error) {
-        console.log('No se pudo eliminar el mensaje de carga:', error);
-      }
+    // Intentar con múltiples imágenes hasta encontrar una que funcione
+    let successfulDownload = false;
+    let finalImageResult: any = null;
+    let downloadResult: any = null;
+    let triedImages = 0;
+    const maxAttempts = Math.min(shuffledResults.length, 5); // Máximo 5 intentos
 
-      // Enviar imagen desde caché
-      const showCacheIndicator = botConfig.options.imageDownload.showCacheIndicator;
-      const formattedResult = formatDownloadedImageResult(
-        cachedEntry.filePath,
-        query,
-        showCacheIndicator,
-        {
-          fileSize: cachedEntry.fileSize,
-          contentType: cachedEntry.contentType,
-          width: cachedEntry.width,
-          height: cachedEntry.height,
-          title: cachedEntry.title
+    // Primero verificar si alguna de las primeras imágenes ya está en caché
+    for (const imageOption of shuffledResults.slice(0, maxAttempts)) {
+      const cachedEntry = imageCacheService.getCachedEntry(imageOption.url);
+      if (cachedEntry) {
+        console.log(`💾 Image cache HIT para ${imageOption.url}`);
+        
+        // Eliminar mensaje de carga
+        try {
+          await ctx.api.deleteMessage(ctx.chat.id, loadingMessage.message_id);
+        } catch (error) {
+          console.log('No se pudo eliminar el mensaje de carga:', error);
         }
-      );
 
-      const sentMessage = await ctx.replyWithPhoto(new InputFile(fs.createReadStream(cachedEntry.filePath)), {
-        caption: formattedResult.message,
-        parse_mode: "HTML",
-        disable_notification: botConfig.options.silentReplies,
-      });
+        // Enviar imagen desde caché
+        const showCacheIndicator = botConfig.options.imageDownload.showCacheIndicator;
+        const formattedResult = formatDownloadedImageResult(
+          cachedEntry.filePath,
+          query,
+          showCacheIndicator,
+          {
+            fileSize: cachedEntry.fileSize,
+            contentType: cachedEntry.contentType,
+            width: cachedEntry.width,
+            height: cachedEntry.height,
+            title: cachedEntry.title
+          }
+        );
 
-      // Log de la búsqueda
-      if (botConfig.options.logMessages) {
-        console.log(`🖼️ Imagen desde caché para "${query}" por ${ctx.from?.first_name} (${ctx.from?.id})`);
+        const sentMessage = await ctx.replyWithPhoto(new InputFile(fs.createReadStream(cachedEntry.filePath)), {
+          caption: formattedResult.message,
+          parse_mode: "HTML",
+          disable_notification: botConfig.options.silentReplies,
+        });
+
+        // Log de la búsqueda
+        if (botConfig.options.logMessages) {
+          console.log(`🖼️ Imagen desde caché para "${query}" por ${ctx.from?.first_name} (${ctx.from?.id})`);
+        }
+
+        return;
+      }
+    }
+
+    // Si no hay caché, intentar descargar múltiples imágenes
+    console.log(`🔄 Intentando descargar hasta ${maxAttempts} imágenes para "${query}"`);
+    
+    for (const imageOption of shuffledResults.slice(0, maxAttempts)) {
+      triedImages++;
+      console.log(`❌ Image cache MISS para ${imageOption.url}`);
+      
+      // Actualizar mensaje de carga
+      try {
+        await ctx.api.editMessageText(
+          ctx.chat.id, 
+          loadingMessage.message_id, 
+          `📥 Descargando imagen... (${triedImages}/${maxAttempts})`
+        );
+      } catch (error) {
+        console.log('No se pudo actualizar el mensaje de carga:', error);
       }
 
-      return;
-    }
+      // Intentar descargar esta imagen
+      downloadResult = await imageDownloadService.downloadImage(imageOption.url);
 
-    // Actualizar mensaje de carga
-    try {
-      await ctx.api.editMessageText(ctx.chat.id, loadingMessage.message_id, "📥 Descargando imagen...");
-    } catch (error) {
-      console.log('No se pudo actualizar el mensaje de carga:', error);
+      if (downloadResult.success && downloadResult.filePath) {
+        console.log(`✅ Descarga exitosa en intento ${triedImages}: ${imageOption.url}`);
+        finalImageResult = imageOption;
+        successfulDownload = true;
+        break;
+      } else {
+        console.log(`❌ Intento ${triedImages} falló: ${downloadResult.error}`);
+        // Continuar con la siguiente imagen
+      }
     }
-
-    // Descargar imagen
-    const downloadResult = await imageDownloadService.downloadImage(imageResult.url);
 
     // Eliminar mensaje de carga
     try {
@@ -551,21 +587,22 @@ bot.command("img", async (ctx) => {
       console.log('No se pudo eliminar el mensaje de carga:', error);
     }
 
-    if (!downloadResult.success || !downloadResult.filePath) {
-      // Fallar silenciosamente y enviar el enlace original como fallback
-      const formattedResult = formatImageResult(imageResult, query);
+    if (!successfulDownload || !downloadResult || !downloadResult.filePath) {
+      // Si todas las descargas fallaron, usar enlace de la primera imagen como fallback
+      console.log(`⚠️ Todas las descargas fallaron para "${query}", usando fallback URL`);
+      const formattedResult = formatImageResult(shuffledResults[0], query);
       await ctx.reply(formattedResult.message, {
         parse_mode: "HTML",
         disable_notification: botConfig.options.silentReplies,
       });
       
       if (botConfig.options.logMessages) {
-        console.log(`⚠️ Descarga falló para "${query}", usando fallback URL. Error: ${downloadResult.error}`);
+        console.log(`⚠️ Descarga falló para "${query}", usando fallback URL después de ${triedImages} intentos`);
       }
       return;
     }
 
-    // Enviar imagen descargada
+    // Enviar imagen descargada exitosamente
     const formattedResult = formatDownloadedImageResult(
       downloadResult.filePath,
       query,
@@ -575,7 +612,7 @@ bot.command("img", async (ctx) => {
         contentType: downloadResult.contentType,
         width: downloadResult.width,
         height: downloadResult.height,
-        title: imageResult.title
+        title: finalImageResult.title
       }
     );
 
@@ -587,7 +624,7 @@ bot.command("img", async (ctx) => {
 
     // Guardar en caché
     imageCacheService.addEntry(
-      imageResult.url,
+      finalImageResult.url,
       downloadResult.filePath,
       query,
       {
@@ -597,12 +634,9 @@ bot.command("img", async (ctx) => {
         contentType: downloadResult.contentType,
         width: downloadResult.width,
         height: downloadResult.height,
-        title: imageResult.title
+        title: finalImageResult.title
       }
     );
-
-    // Limpiar archivo temporal después de enviar (opcional, podemos mantenerlo para el caché)
-    // imageDownloadService.cleanupFile(downloadResult.filePath);
 
     // Log de la búsqueda
     if (botConfig.options.logMessages) {
@@ -679,20 +713,20 @@ bot.command("imgx", async (ctx) => {
       disable_notification: botConfig.options.silentReplies,
     });
 
-    // Buscar imagen aleatoria SIN SafeSearch
-    const imageResult = await imageSearchService.getRandomImage(query, {
-      maxResults: 50,
+    // Buscar múltiples imágenes SIN SafeSearch para tener alternativas
+    const searchResponse = await imageSearchService.searchImages(query, {
+      maxResults: 10,
       safeSearch: 'off'  // ⚠️ SafeSearch desactivado
     });
 
-    // Eliminar mensaje de carga
-    try {
-      await ctx.api.deleteMessage(ctx.chat.id, loadingMessage.message_id);
-    } catch (error) {
-      console.log('No se pudo eliminar el mensaje de carga:', error);
-    }
+    if (!searchResponse.success || searchResponse.results.length === 0) {
+      // Eliminar mensaje de carga
+      try {
+        await ctx.api.deleteMessage(ctx.chat.id, loadingMessage.message_id);
+      } catch (error) {
+        console.log('No se pudo eliminar el mensaje de carga:', error);
+      }
 
-    if (!imageResult) {
       const noResultsMessage = formatNoImagesFound(query);
       await ctx.reply(noResultsMessage.message, {
         parse_mode: "HTML",
@@ -701,21 +735,176 @@ bot.command("imgx", async (ctx) => {
       return;
     }
 
-    // Formatear el resultado (usa la misma función que /img)
-    const formattedResult = formatImageResult(imageResult, query);
+    // Randomizar las opciones para mayor variedad
+    const shuffledResults = [...searchResponse.results].sort(() => Math.random() - 0.5);
+
+    // Verificar si el download de imágenes está habilitado
+    if (!botConfig.options.enableImageDownload || !botConfig.options.imageDownload.enabled) {
+      // Eliminar mensaje de carga
+      try {
+        await ctx.api.deleteMessage(ctx.chat.id, loadingMessage.message_id);
+      } catch (error) {
+        console.log('No se pudo eliminar el mensaje de carga:', error);
+      }
+
+      // Usar método original (solo URL) con la primera imagen
+      const randomImage = shuffledResults[0];
+      const formattedResult = formatImageResult(randomImage, query);
+      await ctx.reply(formattedResult.message, {
+        parse_mode: "HTML",
+        disable_notification: botConfig.options.silentReplies,
+      });
+
+      if (botConfig.options.logMessages) {
+        console.log(`🖼️ Imagen sin filtro (URL) encontrada para "${query}" por ${ctx.from?.first_name} (${ctx.from?.id})`);
+      }
+      return;
+    }
+
+    // Intentar con múltiples imágenes hasta encontrar una que funcione
+    let successfulDownload = false;
+    let finalImageResult: any = null;
+    let downloadResult: any = null;
+    let triedImages = 0;
+    const maxAttempts = Math.min(shuffledResults.length, 5); // Máximo 5 intentos
+
+    // Primero verificar si alguna de las primeras imágenes ya está en caché
+    for (const imageOption of shuffledResults.slice(0, maxAttempts)) {
+      const cachedEntry = imageCacheService.getCachedEntry(imageOption.url);
+      if (cachedEntry) {
+        console.log(`💾 Image cache HIT (sin filtro) para ${imageOption.url}`);
+        
+        // Eliminar mensaje de carga
+        try {
+          await ctx.api.deleteMessage(ctx.chat.id, loadingMessage.message_id);
+        } catch (error) {
+          console.log('No se pudo eliminar el mensaje de carga:', error);
+        }
+
+        // Enviar imagen desde caché
+        const showCacheIndicator = botConfig.options.imageDownload.showCacheIndicator;
+        const formattedResult = formatDownloadedImageResult(
+          cachedEntry.filePath,
+          query,
+          showCacheIndicator,
+          {
+            fileSize: cachedEntry.fileSize,
+            contentType: cachedEntry.contentType,
+            width: cachedEntry.width,
+            height: cachedEntry.height,
+            title: cachedEntry.title
+          }
+        );
+
+        const sentMessage = await ctx.replyWithPhoto(new InputFile(fs.createReadStream(cachedEntry.filePath)), {
+          caption: formattedResult.message,
+          parse_mode: "HTML",
+          disable_notification: botConfig.options.silentReplies,
+        });
+
+        // Log de la búsqueda
+        if (botConfig.options.logMessages) {
+          console.log(`🖼️ Imagen sin filtro desde caché para "${query}" por ${ctx.from?.first_name} (${ctx.from?.id})`);
+        }
+
+        return;
+      }
+    }
+
+    // Si no hay caché, intentar descargar múltiples imágenes
+    console.log(`🔄 Intentando descargar hasta ${maxAttempts} imágenes sin filtro para "${query}"`);
     
-    // Agregar advertencia al mensaje
-    const warningMessage = `⚠️` + formattedResult.message;
-    
-    // Enviar un solo mensaje con toda la información y la URL para que Telegram muestre el preview
-    await ctx.reply(warningMessage, {
+    for (const imageOption of shuffledResults.slice(0, maxAttempts)) {
+      triedImages++;
+      console.log(`❌ Image cache MISS (sin filtro) para ${imageOption.url}`);
+      
+      // Actualizar mensaje de carga
+      try {
+        await ctx.api.editMessageText(
+          ctx.chat.id, 
+          loadingMessage.message_id, 
+          `📥 Descargando imagen sin filtro... (${triedImages}/${maxAttempts})`
+        );
+      } catch (error) {
+        console.log('No se pudo actualizar el mensaje de carga:', error);
+      }
+
+      // Intentar descargar esta imagen
+      downloadResult = await imageDownloadService.downloadImage(imageOption.url);
+
+      if (downloadResult.success && downloadResult.filePath) {
+        console.log(`✅ Descarga sin filtro exitosa en intento ${triedImages}: ${imageOption.url}`);
+        finalImageResult = imageOption;
+        successfulDownload = true;
+        break;
+      } else {
+        console.log(`❌ Intento ${triedImages} sin filtro falló: ${downloadResult.error}`);
+        // Continuar con la siguiente imagen
+      }
+    }
+
+    // Eliminar mensaje de carga
+    try {
+      await ctx.api.deleteMessage(ctx.chat.id, loadingMessage.message_id);
+    } catch (error) {
+      console.log('No se pudo eliminar el mensaje de carga:', error);
+    }
+
+    if (!successfulDownload || !downloadResult || !downloadResult.filePath) {
+      // Si todas las descargas fallaron, usar enlace de la primera imagen como fallback
+      console.log(`⚠️ Todas las descargas sin filtro fallaron para "${query}", usando fallback URL`);
+      const formattedResult = formatImageResult(shuffledResults[0], query);
+      await ctx.reply(formattedResult.message, {
+        parse_mode: "HTML",
+        disable_notification: botConfig.options.silentReplies,
+      });
+      
+      if (botConfig.options.logMessages) {
+        console.log(`⚠️ Descarga sin filtro falló para "${query}", usando fallback URL después de ${triedImages} intentos`);
+      }
+      return;
+    }
+
+    // Enviar imagen descargada exitosamente
+    const formattedResult = formatDownloadedImageResult(
+      downloadResult.filePath,
+      query,
+      false,
+      {
+        fileSize: downloadResult.fileSize,
+        contentType: downloadResult.contentType,
+        width: downloadResult.width,
+        height: downloadResult.height,
+        title: finalImageResult.title
+      }
+    );
+
+    const sentMessage = await ctx.replyWithPhoto(new InputFile(fs.createReadStream(downloadResult.filePath)), {
+      caption: formattedResult.message,
       parse_mode: "HTML",
       disable_notification: botConfig.options.silentReplies,
     });
 
+    // Guardar en caché
+    imageCacheService.addEntry(
+      finalImageResult.url,
+      downloadResult.filePath,
+      query,
+      {
+        messageId: sentMessage.message_id,
+        chatId: ctx.chat.id,
+        fileSize: downloadResult.fileSize,
+        contentType: downloadResult.contentType,
+        width: downloadResult.width,
+        height: downloadResult.height,
+        title: finalImageResult.title
+      }
+    );
+
     // Log de la búsqueda
     if (botConfig.options.logMessages) {
-      console.log(`🖼️ Imagen SIN FILTRO encontrada para "${query}" por ${ctx.from?.first_name} (${ctx.from?.id})`);
+      const sizeKB = downloadResult.fileSize ? Math.round(downloadResult.fileSize / 1024) : 0;
+      console.log(`🖼️ Imagen sin filtro descargada para "${query}" por ${ctx.from?.first_name} (${ctx.from?.id}) - ${sizeKB}KB`);
     }
 
   } catch (error) {
@@ -1656,7 +1845,19 @@ bot.on("message", async (ctx) => {
   // Verificar si el mensaje contiene URLs procesables
   if (ctx.message.text) {
     const urls = extractUrls(ctx.message.text);
-    const processableUrls = urls.filter((url: string) => isProcessableUrl(url));
+    const processableUrls = urls.filter((url: string) => {
+      // Filter out YouTube livestreams
+      if (isYouTubeLivestream(url)) {
+        console.log(`🔴 Ignoring YouTube livestream URL: ${url}`);
+        return false;
+      }
+      // Filter out YouTube channel URLs (not downloadable content)
+      if (isYouTubeChannel(url)) {
+        console.log(`🔴 Ignoring YouTube channel URL: ${url}`);
+        return false;
+      }
+      return isProcessableUrl(url);
+    });
     
     // Handle all processable URLs (includes all social media, video sites, and more)
     if (processableUrls.length > 0) {

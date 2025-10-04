@@ -8,6 +8,8 @@ export interface BotConfigOptions {
   // Bot behavior settings
   silentReplies: boolean;
   logMessages: boolean;
+  skipFailedProcessMessages: boolean; // Skip sending "failed to process" error messages
+  showProcessingMessages: boolean; // Show "🔄 Procesando contenido..." messages (false = only console logs)
   
   // Access control settings
   enableWhitelist: boolean;
@@ -54,6 +56,7 @@ export interface BotConfigOptions {
     showFallbackMessage: boolean;   // Show when using fallback
     showProgress: boolean;          // Show download progress
     showExtractorName: boolean;     // Show "Downloading from YouTube..."
+    showLivestreamMessages: boolean; // Show "🔴 Livestream detectado" messages
   };
   
   // Video processing configuration (ffmpeg optimization)
@@ -102,6 +105,17 @@ export interface BotConfigOptions {
     timeout: number;             // Download timeout in milliseconds
     showCacheIndicator: boolean; // Show when image is from cache
     cleanupAfterDays: number;    // Days to keep cached images
+  };
+
+  // Instagram session-based scraping configuration
+  instagramSession: {
+    enabled: boolean;            // Enable Instagram session-based scraping
+    sessionId: string;           // Instagram sessionid cookie
+    dsUserId: string;            // Instagram ds_user_id cookie
+    csrfToken?: string;          // Optional Instagram csrftoken cookie
+    userAgent?: string;          // User agent string for requests
+    requestDelay: number;        // Delay between requests in milliseconds
+    validateSessionOnStartup: boolean; // Check session validity on bot startup
   };
 }
 

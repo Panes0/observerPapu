@@ -99,15 +99,41 @@ export class YouTubeDLService {
     try {
       console.log(`🔍 Extracting info for: ${url}`);
       
-      // Try with enhanced options for YouTube compatibility
-      const options = {
+      // Enhanced options with Instagram-specific handling
+      let options: any = {
         dumpJson: true,
         skipDownload: true,
-        // Don't use quiet/noWarnings flags that cause --no-no-warnings issue
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         referer: 'https://www.youtube.com/',
         addHeader: ['Accept-Language:en-US,en;q=0.9']
       };
+
+      // Instagram-specific options
+      if (url.includes('instagram.com')) {
+        console.log('🔍 Detected Instagram URL, using Instagram-specific options');
+        options = {
+          ...options,
+          // Use desktop user agent for better compatibility
+          userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          // Instagram-specific headers
+          addHeader: [
+            'Accept-Language:en-US,en;q=0.9',
+            'Accept:text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Encoding:gzip, deflate, br',
+            'DNT:1',
+            'Connection:keep-alive',
+            'Upgrade-Insecure-Requests:1',
+            'Sec-Fetch-Dest:document',
+            'Sec-Fetch-Mode:navigate',
+            'Sec-Fetch-Site:none'
+          ],
+          // Additional Instagram options
+          noCheckCertificate: true,
+          // Instagram cookie options to try avoiding login redirect
+          cookies: ''
+          // Removed sleepInterval - it's causing parameter parsing issues
+        };
+      }
       
       console.log(`🛠️ Using options:`, JSON.stringify(options, null, 2));
       
@@ -143,6 +169,46 @@ export class YouTubeDLService {
       return info;
     } catch (error) {
       console.error(`❌ Error extracting info:`, error);
+      
+      // Try fallback approach for Instagram
+      if (url.includes('instagram.com')) {
+        console.log(`🔄 Trying Instagram fallback approach...`);
+        try {
+          const fallbackOptions = {
+            dumpJson: true,
+            skipDownload: true,
+            // Try without forced extractor
+            userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
+            noCheckCertificate: true,
+            // Try mobile user agent
+            addHeader: [
+              'Accept-Language:en-US,en;q=0.9',
+              'Accept:text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+            ]
+          };
+          
+          const fallbackResult = await youtubeDl(url, fallbackOptions);
+          
+          let fallbackInfo: DownloadInfo;
+          
+          if (typeof fallbackResult === 'string') {
+            if (!fallbackResult.trim()) {
+              throw new Error('Instagram fallback returned empty string');
+            }
+            fallbackInfo = JSON.parse(fallbackResult) as DownloadInfo;
+          } else if (typeof fallbackResult === 'object' && fallbackResult) {
+            fallbackInfo = fallbackResult as DownloadInfo;
+          } else {
+            throw new Error('Instagram fallback returned invalid result');
+          }
+          
+          console.log(`✅ Instagram fallback succeeded`);
+          this.validateInfo(fallbackInfo);
+          return fallbackInfo;
+        } catch (fallbackError) {
+          console.error(`❌ Instagram fallback also failed:`, fallbackError);
+        }
+      }
       
       // Try fallback approach for YouTube
       if (url.includes('youtube.com') || url.includes('youtu.be')) {
@@ -340,8 +406,32 @@ export class YouTubeDLService {
       return `${this.config.audioQuality}[filesize<${maxSize}M]/best[filesize<${maxSize}M]/best`;
     }
     
-    // For video content
-    return `${this.config.videoQuality}[filesize<${maxSize}M]/best[height<=720][filesize<${maxSize}M]/best[filesize<${maxSize}M]/best`;
+    // For video content - use format IDs that work reliably across different YouTube content
+    // Include both AVC1 (H.264) and VP9 formats for maximum compatibility
+    const formatSelectors = [
+      // VP9 formats (often work better for Shorts and newer videos)
+      '606+233',    // 480p VP9 + audio
+      '605+233',    // 360p VP9 + audio
+      '604+233',    // 240p VP9 + audio
+      '603+233',    // 144p VP9 + audio (high fps)
+      '602+233',    // 144p VP9 + audio (low fps)
+      
+      // AVC1 (H.264) formats (traditional formats)
+      '232+233',    // 720p H.264 + audio
+      '231+233',    // 480p H.264 + audio
+      '230+233',    // 360p H.264 + audio
+      '229+233',    // 240p H.264 + audio
+      '269+233',    // 144p H.264 + audio
+      
+      // Fallback to video-only formats (will be silent)
+      '606', '605', '604', '603', '602',  // VP9 video-only
+      '232', '231', '230', '229', '269',  // H.264 video-only
+      
+      // Final fallbacks
+      'best', 'worst'
+    ];
+    
+    return formatSelectors.join('/');
   }
 
   /**

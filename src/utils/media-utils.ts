@@ -8,27 +8,64 @@ export function formatPostForTelegram(post: SocialMediaPost): string {
   const displayOptions = botConfig.options.socialMediaDisplay;
   let message = '';
   
-  // Mostrar plataforma si está habilitado
-  if (displayOptions.showPlatform) {
+  // If this is a reply and there's an original post, show both
+  if (post.originalPost) {
+    // Format original post first
     const platformEmoji = getPlatformEmoji(post.platform);
-    message += `${platformEmoji} <b>${post.platform.toUpperCase()}</b>\n`;
-  }
-  
-  // Mostrar autor si está habilitado
-  if (displayOptions.showAuthor) {
-    message += `👤 <b>Autor:</b> ${post.author}\n`;
-  }
-  
-  // Mostrar contenido si está habilitado
-  if (displayOptions.showContent && post.content) {
-    message += `\n📝 <b>Contenido:</b>\n${post.content}\n`;
-  }
-  
-  // Mostrar estadísticas si están habilitadas
-  if (displayOptions.showStats) {
-    const stats = formatStats(post);
-    if (stats) {
-      message += `\n${stats}\n`;
+    message += `${platformEmoji} <b>${post.platform.toUpperCase()}</b> - CONVERSACIÓN\n\n`;
+    
+    message += `💬 <b>Tweet original:</b>\n`;
+    if (displayOptions.showAuthor) {
+      message += `👤 <b>@${post.originalPost.author}</b>\n`;
+    }
+    if (displayOptions.showContent && post.originalPost.content) {
+      message += `📝 ${post.originalPost.content}\n`;
+    }
+    if (displayOptions.showStats && post.originalPost) {
+      const originalStats = formatStats(post.originalPost);
+      if (originalStats) {
+        message += `${originalStats}\n`;
+      }
+    }
+    
+    // Add separator and reply
+    message += `\n➥ <b>Respuesta:</b>\n`;
+    if (displayOptions.showAuthor) {
+      message += `👤 <b>@${post.author}</b>\n`;
+    }
+    if (displayOptions.showContent && post.content) {
+      message += `📝 ${post.content}\n`;
+    }
+    if (displayOptions.showStats) {
+      const replyStats = formatStats(post);
+      if (replyStats) {
+        message += `${replyStats}\n`;
+      }
+    }
+  } else {
+    // Regular single post formatting
+    // Mostrar plataforma si está habilitado
+    if (displayOptions.showPlatform) {
+      const platformEmoji = getPlatformEmoji(post.platform);
+      message += `${platformEmoji} <b>${post.platform.toUpperCase()}</b>\n`;
+    }
+    
+    // Mostrar autor si está habilitado
+    if (displayOptions.showAuthor) {
+      message += `👤 <b>Autor:</b> ${post.author}\n`;
+    }
+    
+    // Mostrar contenido si está habilitado
+    if (displayOptions.showContent && post.content) {
+      message += `\n📝 <b>Contenido:</b>\n${post.content}\n`;
+    }
+    
+    // Mostrar estadísticas si están habilitadas
+    if (displayOptions.showStats) {
+      const stats = formatStats(post);
+      if (stats) {
+        message += `\n${stats}\n`;
+      }
     }
   }
   

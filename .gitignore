@@ -141,3 +141,8 @@ lib/
 
 # Temporary download directory
 temp_downloads/
+
+.image-cache/
+.claude/
+--sleep-interval
+logs/

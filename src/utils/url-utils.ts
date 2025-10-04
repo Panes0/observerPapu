@@ -445,6 +445,110 @@ export function getDomain(url: string): string {
 }
 
 /**
+ * Detects if a YouTube URL is a channel URL (not downloadable content)
+ */
+export function isYouTubeChannel(url: string): boolean {
+  try {
+    const urlObj = new URL(url);
+    const hostname = urlObj.hostname.toLowerCase();
+    
+    // Check if it's a YouTube URL first
+    if (!hostname.includes('youtube.com') && !hostname.includes('youtu.be')) {
+      return false;
+    }
+    
+    const pathname = urlObj.pathname;
+    
+    // Channel URLs with @handle format
+    if (pathname.match(/^\/@[^\/]+\/?$/)) {
+      return true;
+    }
+    
+    // Traditional channel URLs
+    if (pathname.match(/^\/channel\/[^\/]+\/?$/)) {
+      return true;
+    }
+    
+    // User channel URLs
+    if (pathname.match(/^\/user\/[^\/]+\/?$/)) {
+      return true;
+    }
+    
+    // Channel URLs ending with /videos, /playlists, /community, /about
+    if (pathname.match(/^\/(c\/|channel\/|user\/|@)[^\/]+(\/videos|\/playlists|\/community|\/about|\/shorts)\/?$/)) {
+      return true;
+    }
+    
+    // Channel home pages without additional paths
+    if (pathname.match(/^\/c\/[^\/]+\/?$/)) {
+      return true;
+    }
+    
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Detects if a YouTube URL is a livestream
+ */
+export function isYouTubeLivestream(url: string): boolean {
+  try {
+    const urlObj = new URL(url);
+    const hostname = urlObj.hostname.toLowerCase();
+    
+    // Check if it's a YouTube URL first
+    if (!hostname.includes('youtube.com') && !hostname.includes('youtu.be')) {
+      return false;
+    }
+    
+    // Common livestream URL patterns
+    const pathname = urlObj.pathname;
+    const searchParams = urlObj.searchParams;
+    
+    // Direct live URLs
+    if (pathname.includes('/live/')) {
+      return true;
+    }
+    
+    // Stream URLs
+    if (pathname.includes('/stream/')) {
+      return true;
+    }
+    
+    // Check if it's a watch URL with livestream indicators
+    if (pathname === '/watch' && searchParams.has('v')) {
+      // Check for common livestream parameters
+      if (searchParams.has('live') || 
+          searchParams.get('feature') === 'live' ||
+          searchParams.get('t') === 'live') {
+        return true;
+      }
+    }
+    
+    // Check for channel live URLs
+    if (pathname.includes('/channel/') && pathname.includes('/live')) {
+      return true;
+    }
+    
+    // Check for user live URLs
+    if (pathname.includes('/user/') && pathname.includes('/live')) {
+      return true;
+    }
+    
+    // Check for @handle live URLs
+    if (pathname.includes('/@') && pathname.includes('/live')) {
+      return true;
+    }
+    
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Verifica si una URL es de redes sociales (mantenido para compatibilidad)
  * @deprecated Use isProcessableUrl instead for comprehensive detection
  */

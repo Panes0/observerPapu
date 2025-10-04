@@ -12,10 +12,13 @@ export const botConfig: BotConfig = {
     enableSocialMedia: true,
     enableAI: true, // Enable AI functionality with Together AI
     enableDownloadFallback: true, // Enable youtube-dl-exec fallback for 1000+ sites
+    enableImageDownload: true, // Enable image downloading and caching
     
     // Bot behavior settings
     silentReplies: true, // Use disable_notification for replies
     logMessages: true,   // Log incoming messages to console
+    skipFailedProcessMessages: true, // Skip sending "failed to process" error messages (set to true to disable error messages in chat)
+    showProcessingMessages: false, // Show "🔄 Procesando contenido..." messages (false = only show in console logs, true = show in Telegram)
     
     // Access control settings
     enableWhitelist: true, // Enable whitelist verification
@@ -62,6 +65,7 @@ export const botConfig: BotConfig = {
       showFallbackMessage: true,         // Tell user when using fallback
       showProgress: true,                // Show download progress
       showExtractorName: true,           // Show "Downloading from YouTube..."
+      showLivestreamMessages: false,     // Show "🔴 Livestream detectado" messages (false = skip livestreams silently)
     },
     
     // Video processing configuration (ffmpeg) - Optimizes videos for Telegram
@@ -98,6 +102,29 @@ export const botConfig: BotConfig = {
     messageManagement: {
       autoDeleteOriginalMessage: false,  // Keep original URL messages (false = no delete, true = auto delete)
       deleteDelay: 2000,                 // Delay before deleting in milliseconds (2 seconds)
+    },
+
+    // Image download configuration
+    imageDownload: {
+      enabled: true,                     // Enable image downloading and caching
+      maxFileSize: 10 * 1024 * 1024,     // 10MB maximum file size
+      allowedTypes: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'],
+      tempDir: './temp_downloads',       // Temporary download directory
+      cacheDir: './.image-cache',        // Cache directory
+      timeout: 30000,                    // Download timeout in milliseconds (30 seconds)
+      showCacheIndicator: false,         // Show when image is from cache
+      cleanupAfterDays: 7,               // Days to keep cached images
+    },
+    
+    // Instagram session-based scraping (experimental)
+    instagramSession: {
+      enabled: false,                    // Enable Instagram session-based scraping
+      sessionId: "",                     // Your Instagram sessionid cookie (extract from browser)
+      dsUserId: "",                      // Your Instagram ds_user_id cookie (extract from browser)
+      csrfToken: "",                     // Optional: Instagram csrftoken cookie
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      requestDelay: 2000,                // Delay between requests in milliseconds (2 seconds)
+      validateSessionOnStartup: true,    // Check if session is valid when bot starts
     },
   }
 }; 

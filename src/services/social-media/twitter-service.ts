@@ -25,6 +25,7 @@ export class TwitterService extends BaseSocialMediaService {
       
       // Extraer media del tweet principal
       let allMedia = this.extractMedia(data.tweet);
+      let originalPost: SocialMediaPost | undefined;
       
       // Si hay tweets referenciados (respuestas, retweets, etc.) y están incluidos en la respuesta
       if (data.includes?.tweets) {
@@ -32,6 +33,22 @@ export class TwitterService extends BaseSocialMediaService {
           const referencedMedia = this.extractMedia(referencedTweet);
           // Agregar la media del tweet referenciado al array principal
           allMedia = [...allMedia, ...referencedMedia];
+          
+          // Si este es el tweet original (primera respuesta o tweet padre), crear el objeto original
+          if (!originalPost) {
+            originalPost = {
+              id: referencedTweet.id,
+              platform: 'twitter',
+              url: referencedTweet.url || `https://twitter.com/i/status/${referencedTweet.id}`,
+              author: referencedTweet.author?.name || 'Unknown',
+              content: referencedTweet.text,
+              media: referencedMedia,
+              timestamp: new Date(referencedTweet.date || referencedTweet.created_at),
+              likes: referencedTweet.likes,
+              shares: referencedTweet.retweets,
+              comments: referencedTweet.replies
+            };
+          }
         }
       }
       
@@ -56,7 +73,8 @@ export class TwitterService extends BaseSocialMediaService {
         timestamp: new Date(data.tweet.date),
         likes: data.tweet.likes,
         shares: data.tweet.retweets,
-        comments: data.tweet.replies
+        comments: data.tweet.replies,
+        originalPost
       };
     } catch (error) {
       throw new Error(`Failed to extract Twitter post: ${error}`);

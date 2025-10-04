@@ -2,17 +2,20 @@ import { SocialMediaService, SocialMediaPost, PlatformType } from '../../types/s
 import { TwitterService } from './twitter-service';
 import { InstagramService } from './instagram-service';
 import { TikTokService } from './tiktok-service';
+import { BotConfigOptions } from '../../types/config';
 
 export class SocialMediaManager {
   private services: Map<PlatformType, SocialMediaService> = new Map();
+  private config?: BotConfigOptions;
 
-  constructor() {
+  constructor(config?: BotConfigOptions) {
+    this.config = config;
     this.initializeServices();
   }
 
   private initializeServices(): void {
     this.services.set('twitter', new TwitterService());
-    this.services.set('instagram', new InstagramService());
+    this.services.set('instagram', new InstagramService('https://instafix.io', this.config));
     this.services.set('tiktok', new TikTokService());
   }
 
@@ -75,8 +78,6 @@ export class SocialMediaManager {
 // Exportar servicios individuales para uso directo si es necesario
 export { TwitterService } from './twitter-service';
 export { InstagramService } from './instagram-service';
+export { InstagramSessionService } from './instagram-session-service';
 export { TikTokService } from './tiktok-service';
-export { BaseSocialMediaService } from './base-service';
-
-// Crear una instancia global del manager
-export const socialMediaManager = new SocialMediaManager(); 
+export { BaseSocialMediaService } from './base-service'; 

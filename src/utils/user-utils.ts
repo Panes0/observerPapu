@@ -36,8 +36,15 @@ export function getUserAttribution(ctx: Context): string {
 
 /**
  * Agrega la atribución del usuario a un mensaje existente
+ * Solo muestra la atribución si el mensaje original será eliminado
  */
 export function addUserAttribution(message: string, ctx: Context): string {
+  // Don't show user attribution if the original message won't be deleted
+  // (because the original message already shows who sent the URL)
+  if (!botConfig.options.messageManagement?.autoDeleteOriginalMessage) {
+    return message;
+  }
+  
   const attribution = getUserAttribution(ctx);
   
   if (!attribution) {

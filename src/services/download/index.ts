@@ -23,7 +23,8 @@ const defaultDownloadConfig: DownloadConfig = {
   maxConcurrentDownloads: 2,
   showFallbackMessage: true,
   showProgress: true,
-  showExtractorName: true
+  showExtractorName: true,
+  showLivestreamMessages: false
 };
 
 // Global download service instance (will be configured later)

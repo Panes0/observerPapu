@@ -223,18 +223,8 @@ export class TikTokService extends BaseSocialMediaService {
       console.log('Web scraping failed, using basic extraction');
     }
     
-    return {
-      id: videoId,
-      platform: 'tiktok',
-      url: url,
-      author: username || 'unknown',
-      content: `TikTok video by ${username || 'unknown'}`,
-      media: [],
-      timestamp: new Date(),
-      likes: 0,
-      shares: 0,
-      comments: 0
-    };
+    // Don't return empty media - this will cause the fallback to trigger
+    throw new Error('TikTok alternative method failed to extract video media');
   }
 
   private async extractWithWebScraping(url: string): Promise<SocialMediaPost> {
@@ -258,18 +248,8 @@ export class TikTokService extends BaseSocialMediaService {
     const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
     const title = titleMatch ? titleMatch[1].replace(' | TikTok', '').trim() : '';
 
-    return {
-      id: videoId,
-      platform: 'tiktok',
-      url: url,
-      author: username || 'unknown',
-      content: title || `TikTok video by ${username || 'unknown'}`,
-      media: [],
-      timestamp: new Date(),
-      likes: 0,
-      shares: 0,
-      comments: 0
-    };
+    // Don't return empty media - this will cause the fallback to trigger
+    throw new Error('TikTok web scraping failed to extract video media');
   }
 
   getFixedUrl(url: string): string {

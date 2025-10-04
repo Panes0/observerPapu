@@ -29,10 +29,14 @@ export interface DownloadInfo {
     tbr?: number;
     vbr?: number;
     abr?: number;
+    format_note?: string;
   }>;
   filesize?: number;
   _type?: 'video' | 'audio' | 'playlist';
   playlist_count?: number;
+  // Livestream detection properties
+  live_status?: 'is_live' | 'is_upcoming' | 'was_live' | 'not_live';
+  is_live?: boolean;
 }
 
 export interface DownloadResult {
@@ -78,6 +82,7 @@ export interface DownloadConfig {
   showFallbackMessage: boolean;
   showProgress: boolean;
   showExtractorName: boolean;
+  showLivestreamMessages: boolean;
 }
 
 export interface FileInfo {

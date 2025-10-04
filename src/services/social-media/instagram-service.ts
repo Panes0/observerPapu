@@ -1,15 +1,35 @@
 import { BaseSocialMediaService } from './base-service';
 import { SocialMediaPost, MediaItem } from '../../types/social-media';
+import { InstagramSessionService } from './instagram-session-service';
+import { BotConfigOptions } from '../../types/config';
 
 export class InstagramService extends BaseSocialMediaService {
   private fallbackApis: string[] = [
-    'https://instafix.io',
-    'https://snapinsta.app',
-    'https://igram.world'
+    // All external Instagram APIs are currently down/blocked
+    // Keeping array empty - only session service and youtube-dl will be used
   ];
+  private sessionService?: InstagramSessionService;
+  private config?: BotConfigOptions;
 
-  constructor(baseUrl: string = 'https://instafix.io') {
+  constructor(baseUrl: string = 'https://instafix.io', config?: BotConfigOptions) {
     super(baseUrl, 'instagram');
+    this.config = config;
+    
+    // Initialize session service if configured
+    if (config?.instagramSession?.enabled && config.instagramSession.sessionId && config.instagramSession.dsUserId) {
+      console.log('📱 Instagram session service enabled');
+      this.sessionService = new InstagramSessionService({
+        sessionId: config.instagramSession.sessionId,
+        dsUserId: config.instagramSession.dsUserId,
+        csrfToken: config.instagramSession.csrfToken,
+        userAgent: config.instagramSession.userAgent
+      });
+
+      // Validate session on startup if configured
+      if (config.instagramSession.validateSessionOnStartup) {
+        this.validateSession();
+      }
+    }
   }
 
   canHandle(url: string): boolean {
@@ -21,39 +41,71 @@ export class InstagramService extends BaseSocialMediaService {
   }
 
   async extractPost(url: string): Promise<SocialMediaPost> {
-    const postId = this.extractPostId(url);
-    
-    // Try multiple APIs in sequence
-    for (const apiBaseUrl of this.fallbackApis) {
+    // Try session service first if available
+    if (this.sessionService) {
       try {
-        console.log(`🔄 Trying Instagram API: ${apiBaseUrl}`);
-        const data = await this.tryExtractFromApi(apiBaseUrl, postId, url);
-        if (data) {
-          return data;
-        }
+        console.log('🔄 Trying Instagram session service...');
+        const data = await this.sessionService.extractPost(url);
+        console.log('✅ Instagram session service succeeded');
+        return data;
       } catch (error) {
-        console.error(`❌ Failed with ${apiBaseUrl}:`, error);
-        continue; // Try next API
+        console.error('❌ Instagram session service failed:', error);
+        console.log('🔄 Falling back to API services...');
       }
     }
+
+    // Skip API fallback if no APIs are configured (they're all down)
+    if (this.fallbackApis.length > 0) {
+      const postId = this.extractPostId(url);
+      
+      // Try multiple APIs in sequence as fallback
+      for (const apiBaseUrl of this.fallbackApis) {
+        try {
+          console.log(`🔄 Trying Instagram API: ${apiBaseUrl}`);
+          const data = await this.tryExtractFromApi(apiBaseUrl, postId, url);
+          if (data) {
+            return data;
+          }
+        } catch (error) {
+          console.error(`❌ Failed with ${apiBaseUrl}:`, error);
+          continue; // Try next API
+        }
+      }
+    } else {
+      console.log('⚠️ No Instagram API services configured - all external APIs are down');
+    }
     
-    throw new Error('All Instagram APIs failed to extract post data');
+    throw new Error('Instagram extraction failed - session service failed and no API services available');
   }
 
   private async tryExtractFromApi(apiBaseUrl: string, postId: string, originalUrl: string): Promise<SocialMediaPost | null> {
-    const apiUrl = `${apiBaseUrl}/api/post/${postId}`;
+    // Try different API endpoint formats
+    let apiUrl: string;
+    if (apiBaseUrl.includes('ddinstagram.com')) {
+      apiUrl = `${apiBaseUrl}/p/${postId}.json`;
+    } else if (apiBaseUrl.includes('instafix.io')) {
+      apiUrl = `${apiBaseUrl}/api/post/${postId}`;  
+    } else {
+      apiUrl = `${apiBaseUrl}/api/post/${postId}`;
+    }
     
     try {
       const data = await this.makeRequest(apiUrl);
       
+      // Check if response is HTML (indicates API is down or redirecting)
+      if (typeof data === 'string' && data.includes('<!DOCTYPE html>')) {
+        console.log(`⚠️ ${apiBaseUrl} returned HTML instead of JSON - API may be down`);
+        throw new Error(`API returned HTML response - service may be unavailable`);
+      }
+      
       // Log the response structure for debugging (only for first API)
-      if (apiBaseUrl === this.fallbackApis[0]) {
-        console.log('Instagram API response structure:', JSON.stringify(data, null, 2));
+      if (apiBaseUrl === this.fallbackApis[0] && typeof data === 'object') {
+        console.log('Instagram API response structure:', typeof data === 'string' ? data.substring(0, 200) + '...' : JSON.stringify(data, null, 2));
       }
       
       // Validate required fields
-      if (!data) {
-        throw new Error('No data received from Instagram API');
+      if (!data || typeof data !== 'object') {
+        throw new Error('No valid JSON data received from Instagram API');
       }
       
       // Try different possible structures for owner information
@@ -173,5 +225,31 @@ export class InstagramService extends BaseSocialMediaService {
     }
 
     return media;
+  }
+
+  /**
+   * Validate Instagram session if session service is available
+   */
+  private async validateSession(): Promise<void> {
+    if (!this.sessionService) return;
+
+    try {
+      console.log('🔍 Validating Instagram session...');
+      const isValid = await this.sessionService.validateSession();
+      if (isValid) {
+        console.log('✅ Instagram session is valid');
+      } else {
+        console.log('❌ Instagram session is invalid or expired');
+      }
+    } catch (error) {
+      console.error('❌ Error validating Instagram session:', error);
+    }
+  }
+
+  /**
+   * Get session service if available
+   */
+  getSessionService(): InstagramSessionService | undefined {
+    return this.sessionService;
   }
 } 
