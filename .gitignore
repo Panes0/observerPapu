@@ -143,6 +143,10 @@ lib/
 temp_downloads/
 
 .image-cache/
+*.image-cache/
+
 .claude/
 --sleep-interval
 logs/
+
+RunScript.bat
