@@ -340,9 +340,11 @@ export class SocialMediaHandler {
       // Original error handling when fallback is disabled or fails
       let errorMessage: string;
       const platform = this.detectPlatformFromUrl(url);
-      
+
       if (error instanceof Error) {
-        if (error.message.includes('All Instagram APIs failed')) {
+        if (error.message.includes('This video is processing')) {
+          errorMessage = formatErrorMessage(platform, '⏳ Este video todavía se está procesando en Reddit. Intenta de nuevo en unos minutos.');
+        } else if (error.message.includes('All Instagram APIs failed')) {
           errorMessage = formatErrorMessage(platform, 'No se pudo obtener el contenido de Instagram. Los servicios pueden estar temporalmente no disponibles.');
         } else if (error.message.includes('Access forbidden') || error.message.includes('403')) {
           errorMessage = formatErrorMessage(platform, 'Acceso denegado. El servicio puede estar bloqueando las solicitudes.');
@@ -357,9 +359,12 @@ export class SocialMediaHandler {
         errorMessage = formatErrorMessage(platform, 'Error inesperado al procesar el contenido.');
       }
       
-      // If we tried fallback, mention that both methods failed
+      // If we tried fallback, mention that both methods failed (unless it's a processing error)
       if (botConfig.options.enableDownloadFallback && botConfig.options.downloadFallback.enabled) {
-        errorMessage = formatErrorMessage(platform, 'No se pudo procesar el contenido con ningún método disponible.');
+        // Don't override specific error messages like "video is processing"
+        if (error instanceof Error && !error.message.includes('This video is processing')) {
+          errorMessage = formatErrorMessage(platform, 'No se pudo procesar el contenido con ningún método disponible.');
+        }
       }
       
       // Update processing message with error only if not skipped in config

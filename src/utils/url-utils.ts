@@ -1,11 +1,21 @@
 import { PlatformType } from '../types/social-media';
 
 /**
- * Extrae URLs de un texto
+ * Extrae URLs de un texto y elimina duplicados
  */
 export function extractUrls(text: string): string[] {
   const urlRegex = /(https?:\/\/[^\s]+)/g;
-  return text.match(urlRegex) || [];
+  const urls = text.match(urlRegex) || [];
+
+  // Deduplicate URLs - only return unique URLs
+  const uniqueUrls = [...new Set(urls)];
+
+  // Log if duplicates were removed
+  if (urls.length !== uniqueUrls.length) {
+    console.log(`🔄 Removed ${urls.length - uniqueUrls.length} duplicate URL(s) from message`);
+  }
+
+  return uniqueUrls;
 }
 
 /**

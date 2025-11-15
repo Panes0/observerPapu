@@ -20,7 +20,15 @@
       "WebFetch(domain:api.fxtwitter.com)",
       "Bash(.\\node_modules\\.bin\\yt-dlp.exe:*)",
       "Bash(.\\node_modules\\youtube-dl-exec\\bin\\yt-dlp.exe:*)",
-      "Bash(./node_modules/youtube-dl-exec/bin/yt-dlp.exe:*)"
+      "Bash(./node_modules/youtube-dl-exec/bin/yt-dlp.exe:*)",
+      "Bash(pm2 delete:*)",
+      "Bash(pm2 start:*)",
+      "Bash(pm2 logs:*)",
+      "Bash(pm2 status:*)",
+      "Bash(pm2 restart:*)",
+      "Bash(timeout 3 pm2 logs:*)",
+      "Bash(curl:*)",
+      "Bash(\"..\\node_modules\\youtube-dl-exec\\bin\\yt-dlp.exe\" \"https://www.reddit.com/r/TikTokCringe/comments/1ownxfs/man_desperately_swiping_right_while_waiting_for/\" --list-formats)"
     ],
     "deny": [],
     "additionalDirectories": [

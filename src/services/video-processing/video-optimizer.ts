@@ -117,7 +117,9 @@ export class VideoOptimizer {
    */
   private async checkIfNeedsOptimization(inputPath: string, options: VideoOptimizationOptions): Promise<boolean> {
     return new Promise((resolve, reject) => {
-      ffmpeg.ffprobe(inputPath, (err: any, metadata: any) => {
+      // Hide terminal window on Windows for ffprobe
+      const probeOptions = process.platform === 'win32' ? { windowsHide: true } : {};
+      ffmpeg.ffprobe(inputPath, probeOptions, (err: any, metadata: any) => {
         if (err) {
           reject(err);
           return;
@@ -171,7 +173,9 @@ export class VideoOptimizer {
   private processVideo(inputPath: string, outputPath: string, options: VideoOptimizationOptions): Promise<void> {
     return new Promise((resolve, reject) => {
       // First, get video metadata to determine aspect ratio
-      ffmpeg.ffprobe(inputPath, (err: any, metadata: any) => {
+      // Hide terminal window on Windows for ffprobe
+      const probeOptions = process.platform === 'win32' ? { windowsHide: true } : {};
+      ffmpeg.ffprobe(inputPath, probeOptions, (err: any, metadata: any) => {
         if (err) {
           reject(err);
           return;
@@ -250,6 +254,12 @@ export class VideoOptimizer {
 
         // Configurar formato de salida
         command = command.format('mp4');
+
+        // Hide terminal window on Windows
+        // @ts-ignore - _spawnOptions is not in the type definitions but exists
+        if (process.platform === 'win32') {
+          command._spawnOptions = { windowsHide: true };
+        }
 
         // Ejecutar procesamiento
         command

@@ -130,9 +130,8 @@ export class YouTubeDLService {
             'Sec-Fetch-Site:none'
           ],
           // Additional Instagram options
-          noCheckCertificate: true,
-          // Instagram cookie options to try avoiding login redirect
-          cookies: ''
+          noCheckCertificate: true
+          // Removed cookies: '' - it's causing parameter parsing issues
           // Removed sleepInterval - it's causing parameter parsing issues
         };
       }
@@ -410,13 +409,18 @@ export class YouTubeDLService {
    */
   private buildFormatSelector(info: DownloadInfo): string {
     const maxSize = Math.floor(this.config.maxFileSize / (1024 * 1024)); // Convert to MB
-    
+
     // For audio-only content
     if (this.isAudioContent(info)) {
       return `${this.config.audioQuality}[filesize<${maxSize}M]/best[filesize<${maxSize}M]/best`;
     }
-    
-    // For video content - use format IDs that work reliably across different YouTube content
+
+    // For Reddit content - use universal format selector
+    if (info.extractor && info.extractor.toLowerCase() === 'reddit') {
+      return 'bestvideo[height<=720]+bestaudio/best[height<=720]/bestvideo+bestaudio/best';
+    }
+
+    // For YouTube content - use format IDs that work reliably across different YouTube content
     // Include both AVC1 (H.264) and VP9 formats for maximum compatibility
     const formatSelectors = [
       // VP9 formats (often work better for Shorts and newer videos)
@@ -425,22 +429,22 @@ export class YouTubeDLService {
       '604+233',    // 240p VP9 + audio
       '603+233',    // 144p VP9 + audio (high fps)
       '602+233',    // 144p VP9 + audio (low fps)
-      
+
       // AVC1 (H.264) formats (traditional formats)
       '232+233',    // 720p H.264 + audio
       '231+233',    // 480p H.264 + audio
       '230+233',    // 360p H.264 + audio
       '229+233',    // 240p H.264 + audio
       '269+233',    // 144p H.264 + audio
-      
+
       // Fallback to video-only formats (will be silent)
       '606', '605', '604', '603', '602',  // VP9 video-only
       '232', '231', '230', '229', '269',  // H.264 video-only
-      
-      // Final fallbacks
-      'best', 'worst'
+
+      // Universal fallbacks for non-YouTube content
+      'bestvideo[height<=720]+bestaudio/best[height<=720]/bestvideo+bestaudio/best'
     ];
-    
+
     return formatSelectors.join('/');
   }
 

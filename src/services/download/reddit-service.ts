@@ -209,35 +209,23 @@ export class RedditService {
   }
 
   /**
-   * Downloads Reddit video by extracting direct URL first
+   * Downloads Reddit video by using yt-dlp which handles DASH manifests properly
    */
   async downloadRedditVideo(url: string, youtubeDlService: any): Promise<DownloadResult> {
     try {
-      console.log(`🔄 Starting Reddit video download for: ${url}`);
-      
-      // First, extract the direct video URL using Reddit API
-      const redditInfo = await this.extractVideoInfo(url);
-      if (!redditInfo || !redditInfo.formats || redditInfo.formats.length === 0) {
-        throw new Error('No video URL found in Reddit post');
+      console.log(`🔄 Starting Reddit video download using yt-dlp: ${url}`);
+
+      // Use yt-dlp to download Reddit videos - it handles DASH manifests and audio merging
+      // Skip Reddit detection to avoid infinite loop
+      const result = await youtubeDlService.downloadMedia(url, true);
+
+      if (result.success) {
+        console.log(`✅ Reddit video download successful via yt-dlp`);
+        result.extractor = 'reddit';
       }
-      
-      const directVideoUrl = redditInfo.formats[0].url;
-      console.log(`🎯 Direct Reddit video URL: ${directVideoUrl}`);
-      
-      // Download the direct video URL using simple HTTP download (bypass youtube-dl metadata extraction)
-      const downloadResult = await this.downloadDirectVideoFile(directVideoUrl, redditInfo);
-      
-              if (downloadResult.success) {
-          // Override the info with Reddit-specific data
-          const redditInfo = await this.extractVideoInfo(url);
-          downloadResult.info = redditInfo;
-          downloadResult.extractor = 'reddit';
-          
-          console.log(`✅ Reddit video download successful`);
-        }
-      
-      return downloadResult;
-      
+
+      return result;
+
     } catch (error) {
       console.error(`❌ Reddit video download failed:`, error);
       return {
@@ -254,7 +242,7 @@ export class RedditService {
   private async downloadDirectVideoFile(videoUrl: string, redditInfo: DownloadInfo | undefined): Promise<DownloadResult> {
     try {
       console.log(`📥 Downloading Reddit video directly: ${videoUrl}`);
-      
+
       // Generate filename
       const timestamp = Date.now();
       const cleanTitle = redditInfo?.title
@@ -262,53 +250,100 @@ export class RedditService {
         : 'reddit_video';
       const fileName = `${timestamp}_${cleanTitle}.mp4`;
       const tempDir = './temp_downloads'; // Should get this from config
-      const filePath = `${tempDir}/${fileName}`;
-      
+      const videoFilePath = `${tempDir}/${timestamp}_${cleanTitle}_video.mp4`;
+      const audioFilePath = `${tempDir}/${timestamp}_${cleanTitle}_audio.mp4`;
+      const finalFilePath = `${tempDir}/${fileName}`;
+
       // Ensure temp directory exists
       const fs = await import('fs');
       if (!fs.existsSync(tempDir)) {
         fs.mkdirSync(tempDir, { recursive: true });
       }
-      
+
       // Download the video file
-      const response = await fetch(videoUrl, {
+      console.log(`📥 Downloading video stream...`);
+      const videoResponse = await fetch(videoUrl, {
         headers: {
           'User-Agent': this.userAgent,
           'Accept': 'video/mp4,video/*,*/*',
           'Referer': 'https://www.reddit.com/'
         }
       });
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+
+      if (!videoResponse.ok) {
+        throw new Error(`HTTP ${videoResponse.status}: ${videoResponse.statusText}`);
       }
-      
+
       // Get content length for file size
-      const contentLength = response.headers.get('content-length');
+      const contentLength = videoResponse.headers.get('content-length');
       const fileSize = contentLength ? parseInt(contentLength) : undefined;
-      
+
       if (fileSize && fileSize > 50 * 1024 * 1024) { // 50MB limit
         throw new Error(`File too large: ${fileSize} bytes`);
       }
-      
-      // Write file to disk
-      const arrayBuffer = await response.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-      
-      fs.writeFileSync(filePath, buffer);
-      
-      console.log(`✅ Reddit video downloaded: ${filePath} (${buffer.length} bytes)`);
-      
-              return {
-          success: true,
-          filePath: filePath,
-          fileName: fileName,
-          fileSize: buffer.length,
-          duration: redditInfo?.duration,
-          info: redditInfo,
-          extractor: 'reddit'
-        };
-      
+
+      // Write video file to disk
+      const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
+      fs.writeFileSync(videoFilePath, videoBuffer);
+      console.log(`✅ Video stream downloaded: ${videoBuffer.length} bytes`);
+
+      // Try to download audio stream
+      // Reddit audio is typically at the same base URL but with DASH_audio.mp4 or DASH_AUDIO_128.mp4
+      const audioUrl = this.getAudioUrl(videoUrl);
+      let hasAudio = false;
+
+      if (audioUrl) {
+        try {
+          console.log(`📥 Downloading audio stream: ${audioUrl}`);
+          const audioResponse = await fetch(audioUrl, {
+            headers: {
+              'User-Agent': this.userAgent,
+              'Accept': 'audio/mp4,audio/*,*/*',
+              'Referer': 'https://www.reddit.com/'
+            }
+          });
+
+          if (audioResponse.ok) {
+            const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
+            fs.writeFileSync(audioFilePath, audioBuffer);
+            console.log(`✅ Audio stream downloaded: ${audioBuffer.length} bytes`);
+            hasAudio = true;
+          } else {
+            console.log(`⚠️ Audio stream not available (${audioResponse.status})`);
+          }
+        } catch (audioError) {
+          console.log(`⚠️ Could not download audio:`, audioError);
+        }
+      }
+
+      // Merge video and audio if both exist
+      if (hasAudio) {
+        console.log(`🔄 Merging video and audio streams...`);
+        await this.mergeVideoAndAudio(videoFilePath, audioFilePath, finalFilePath);
+
+        // Clean up temporary files
+        fs.unlinkSync(videoFilePath);
+        fs.unlinkSync(audioFilePath);
+        console.log(`✅ Video and audio merged successfully`);
+      } else {
+        // No audio available, just rename video file
+        console.log(`⚠️ No audio stream found, using video-only file`);
+        fs.renameSync(videoFilePath, finalFilePath);
+      }
+
+      const finalFileSize = fs.statSync(finalFilePath).size;
+      console.log(`✅ Reddit video ready: ${finalFilePath} (${finalFileSize} bytes)`);
+
+      return {
+        success: true,
+        filePath: finalFilePath,
+        fileName: fileName,
+        fileSize: finalFileSize,
+        duration: redditInfo?.duration,
+        info: redditInfo,
+        extractor: 'reddit'
+      };
+
     } catch (error) {
       console.error(`❌ Direct video download failed:`, error);
       return {
@@ -317,5 +352,66 @@ export class RedditService {
         extractor: 'reddit'
       };
     }
+  }
+
+  /**
+   * Gets the audio URL from a Reddit video URL
+   */
+  private getAudioUrl(videoUrl: string): string | null {
+    try {
+      // Reddit video URLs typically look like:
+      // https://v.redd.it/abc123/DASH_720.mp4
+      // Audio is at:
+      // https://v.redd.it/abc123/DASH_audio.mp4 or DASH_AUDIO_128.mp4
+
+      // Try common audio file patterns
+      const audioPatterns = [
+        'DASH_audio.mp4',
+        'DASH_AUDIO_128.mp4',
+        'DASH_AUDIO_64.mp4',
+        'audio.mp4'
+      ];
+
+      // Extract base URL (everything before the last /)
+      const lastSlashIndex = videoUrl.lastIndexOf('/');
+      if (lastSlashIndex === -1) return null;
+
+      const baseUrl = videoUrl.substring(0, lastSlashIndex);
+
+      // Try the most common pattern first
+      return `${baseUrl}/DASH_audio.mp4`;
+
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Merges video and audio files using FFmpeg
+   */
+  private async mergeVideoAndAudio(videoPath: string, audioPath: string, outputPath: string): Promise<void> {
+    const ffmpeg = await import('fluent-ffmpeg');
+
+    return new Promise((resolve, reject) => {
+      const command = ffmpeg.default(videoPath)
+        .input(audioPath)
+        .outputOptions([
+          '-c:v copy',      // Copy video codec (no re-encoding)
+          '-c:a aac',       // Convert audio to AAC
+          '-strict experimental',
+          '-shortest'       // Match shortest stream duration
+        ])
+        .output(outputPath)
+        .on('end', () => resolve())
+        .on('error', (err: Error) => reject(err));
+
+      // Hide terminal window on Windows
+      // @ts-ignore - _spawnOptions is not in the type definitions but exists
+      if (process.platform === 'win32') {
+        command._spawnOptions = { windowsHide: true };
+      }
+
+      command.run();
+    });
   }
 } 
