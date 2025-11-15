@@ -39,6 +39,8 @@ export class YouTubeDLService {
       console.log('🔄 Fetching supported sites list...');
       const result = await youtubeDl('', {
         listExtractors: true
+      }, {
+        windowsHide: true  // Hide terminal window on Windows
       });
 
       if (typeof result === 'string') {
@@ -136,9 +138,11 @@ export class YouTubeDLService {
       }
       
       console.log(`🛠️ Using options:`, JSON.stringify(options, null, 2));
-      
-      const result = await youtubeDl(url, options);
-      
+
+      const result = await youtubeDl(url, options, {
+        windowsHide: true  // Hide terminal window on Windows
+      });
+
       console.log(`📋 Raw result type: ${typeof result}`);
       console.log(`📋 Raw result length: ${typeof result === 'string' ? result.length : 'N/A'}`);
       
@@ -186,9 +190,11 @@ export class YouTubeDLService {
               'Accept:text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
             ]
           };
-          
-          const fallbackResult = await youtubeDl(url, fallbackOptions);
-          
+
+          const fallbackResult = await youtubeDl(url, fallbackOptions, {
+            windowsHide: true  // Hide terminal window on Windows
+          });
+
           let fallbackInfo: DownloadInfo;
           
           if (typeof fallbackResult === 'string') {
@@ -223,9 +229,11 @@ export class YouTubeDLService {
             preferFreeFormats: true
             // Removed verbose: true to avoid potential flag issues
           };
-          
-          const fallbackResult = await youtubeDl(url, fallbackOptions);
-          
+
+          const fallbackResult = await youtubeDl(url, fallbackOptions, {
+            windowsHide: true  // Hide terminal window on Windows
+          });
+
           let fallbackInfo: DownloadInfo;
           
           if (typeof fallbackResult === 'string') {
@@ -317,10 +325,12 @@ export class YouTubeDLService {
       }
 
       console.log(`🎯 Using format: ${downloadOptions.format}`);
-      
+
       // Execute download
-      const result = await youtubeDl(url, downloadOptions);
-      
+      const result = await youtubeDl(url, downloadOptions, {
+        windowsHide: true  // Hide terminal window on Windows
+      });
+
       // Find the downloaded file
       const downloadedFile = await this.findDownloadedFile(outputTemplate, info.title || 'download');
       
