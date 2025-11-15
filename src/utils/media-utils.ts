@@ -1,5 +1,7 @@
 import { SocialMediaPost, MediaItem } from '../types/social-media';
 import { botConfig } from '../../config/bot.config';
+import * as fs from 'fs';
+import * as path from 'path';
 
 /**
  * Formatea un post de redes sociales para Telegram
@@ -160,4 +162,47 @@ export function formatDuration(seconds: number): string {
 export function formatErrorMessage(platform: string, error: string): string {
   const emoji = getPlatformEmoji(platform);
   return `${emoji} <b>Error al procesar ${platform.toUpperCase()}</b>\n\n❌ ${error}`;
+}
+
+/**
+ * Downloads media from a URL to a local file
+ */
+export async function downloadMedia(url: string, outputPath: string): Promise<string> {
+  const response = await fetch(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to download media: ${response.status} ${response.statusText}`);
+  }
+
+  // Ensure directory exists
+  const dir = path.dirname(outputPath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+
+  // Download the file
+  const arrayBuffer = await response.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+
+  fs.writeFileSync(outputPath, buffer);
+
+  return outputPath;
+}
+
+/**
+ * Checks if a URL is from Twitter/X
+ */
+export function isTwitterUrl(url: string): boolean {
+  try {
+    const urlObj = new URL(url);
+    return urlObj.hostname.includes('twitter.com') ||
+           urlObj.hostname.includes('twimg.com') ||
+           urlObj.hostname.includes('x.com');
+  } catch {
+    return false;
+  }
 } 

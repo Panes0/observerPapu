@@ -1,7 +1,7 @@
 import { Context, InputFile } from 'grammy';
 import { SocialMediaManager } from '../../services/social-media';
 import { extractUrls, isSocialMediaUrl, isProcessableUrl, getDomain, isYouTubeLivestream } from '../../utils/url-utils';
-import { formatPostForTelegram, formatErrorMessage, getMainMediaType } from '../../utils/media-utils';
+import { formatPostForTelegram, formatErrorMessage, getMainMediaType, downloadMedia, isTwitterUrl } from '../../utils/media-utils';
 import { SocialMediaPost } from '../../types/social-media';
 // Removed old social-media-config imports - now using main bot config
 import { getDownloadService } from '../../services/download';
@@ -427,11 +427,44 @@ export class SocialMediaHandler {
           disable_notification: true // Silent reply
         });
       } else if (mediaType === 'video') {
-        sentMessage = await ctx.replyWithVideo(mainMedia.url, {
-          caption: message,
-          parse_mode: 'HTML',
-          disable_notification: true // Silent reply
-        });
+        // Check if this is a Twitter video that needs to be downloaded first
+        if (isTwitterUrl(mainMedia.url)) {
+          try {
+            console.log(`📥 Downloading Twitter video: ${mainMedia.url}`);
+            const tempPath = `temp_downloads/twitter_${Date.now()}_${Math.random().toString(36).substring(7)}.mp4`;
+            const downloadedPath = await downloadMedia(mainMedia.url, tempPath);
+
+            // Send the downloaded file
+            sentMessage = await ctx.replyWithVideo(new InputFile(downloadedPath), {
+              caption: message,
+              parse_mode: 'HTML',
+              disable_notification: true // Silent reply
+            });
+
+            // Clean up the downloaded file
+            try {
+              fs.unlinkSync(downloadedPath);
+              console.log(`🗑️ Cleaned up downloaded file: ${downloadedPath}`);
+            } catch (cleanupError) {
+              console.error('Error cleaning up file:', cleanupError);
+            }
+          } catch (downloadError) {
+            console.error('Error downloading Twitter video, trying direct URL:', downloadError);
+            // Fallback to direct URL if download fails
+            sentMessage = await ctx.replyWithVideo(mainMedia.url, {
+              caption: message,
+              parse_mode: 'HTML',
+              disable_notification: true // Silent reply
+            });
+          }
+        } else {
+          // For non-Twitter videos, try direct URL first
+          sentMessage = await ctx.replyWithVideo(mainMedia.url, {
+            caption: message,
+            parse_mode: 'HTML',
+            disable_notification: true // Silent reply
+          });
+        }
       } else if (mediaType === 'gif') {
         sentMessage = await ctx.replyWithAnimation(mainMedia.url, {
           caption: message,
@@ -466,46 +499,73 @@ export class SocialMediaHandler {
   private static async sendMediaGroup(ctx: Context, post: SocialMediaPost, message: string): Promise<any> {
     try {
       const media = [];
-      
+      const downloadedFiles: string[] = [];
+
       // Group media by type to handle mixed media properly
       const images = post.media!.filter(item => item.type === 'image');
       const videos = post.media!.filter(item => item.type === 'video');
       const gifs = post.media!.filter(item => item.type === 'gif');
-      
+
       // Telegram media groups can only contain photos and videos (not gifs)
       // We'll send compatible media first, then any gifs separately
       const compatibleMedia = [...images, ...videos];
-      
+
       if (compatibleMedia.length > 1) {
         // Build media group array
         for (let i = 0; i < Math.min(compatibleMedia.length, 10); i++) { // Telegram limit is 10 media items
           const item = compatibleMedia[i];
+          let mediaSource: string | InputFile = item.url;
+
+          // Download Twitter videos first
+          if (item.type === 'video' && isTwitterUrl(item.url)) {
+            try {
+              console.log(`📥 Downloading Twitter video for media group: ${item.url}`);
+              const tempPath = `temp_downloads/twitter_mg_${Date.now()}_${i}_${Math.random().toString(36).substring(7)}.mp4`;
+              const downloadedPath = await downloadMedia(item.url, tempPath);
+              mediaSource = new InputFile(downloadedPath);
+              downloadedFiles.push(downloadedPath);
+            } catch (downloadError) {
+              console.error('Error downloading Twitter video in media group:', downloadError);
+              // Fallback to URL if download fails
+            }
+          }
+
           const mediaItem: any = {
-            media: item.url,
+            media: mediaSource,
             caption: i === 0 ? message : undefined, // Only add caption to first item
             parse_mode: i === 0 ? 'HTML' : undefined
           };
-          
+
           if (item.type === 'image') {
             mediaItem.type = 'photo';
           } else if (item.type === 'video') {
             mediaItem.type = 'video';
           }
-          
+
           media.push(mediaItem);
         }
         
         const sentMessages = await ctx.replyWithMediaGroup(media, {
           disable_notification: true
         });
-        
+
+        // Clean up downloaded files
+        for (const filePath of downloadedFiles) {
+          try {
+            fs.unlinkSync(filePath);
+            console.log(`🗑️ Cleaned up downloaded file: ${filePath}`);
+          } catch (cleanupError) {
+            console.error('Error cleaning up file:', cleanupError);
+          }
+        }
+
         // Send any remaining gifs separately
         for (const gif of gifs) {
           await ctx.replyWithAnimation(gif.url, {
             disable_notification: true
           });
         }
-        
+
         console.log(`📷 Sent media group with ${compatibleMedia.length} items + ${gifs.length} gifs`);
         return sentMessages[0]; // Return first message for caching
         
@@ -523,11 +583,42 @@ export class SocialMediaHandler {
               disable_notification: true
             });
           } else if (item.type === 'video') {
-            firstMessage = await ctx.replyWithVideo(item.url, {
-              caption: message,
-              parse_mode: 'HTML',
-              disable_notification: true
-            });
+            // Download Twitter videos first
+            if (isTwitterUrl(item.url)) {
+              try {
+                console.log(`📥 Downloading Twitter video: ${item.url}`);
+                const tempPath = `temp_downloads/twitter_single_${Date.now()}_${Math.random().toString(36).substring(7)}.mp4`;
+                const downloadedPath = await downloadMedia(item.url, tempPath);
+
+                firstMessage = await ctx.replyWithVideo(new InputFile(downloadedPath), {
+                  caption: message,
+                  parse_mode: 'HTML',
+                  disable_notification: true
+                });
+
+                // Clean up
+                try {
+                  fs.unlinkSync(downloadedPath);
+                  console.log(`🗑️ Cleaned up downloaded file: ${downloadedPath}`);
+                } catch (cleanupError) {
+                  console.error('Error cleaning up file:', cleanupError);
+                }
+              } catch (downloadError) {
+                console.error('Error downloading Twitter video:', downloadError);
+                // Fallback to URL
+                firstMessage = await ctx.replyWithVideo(item.url, {
+                  caption: message,
+                  parse_mode: 'HTML',
+                  disable_notification: true
+                });
+              }
+            } else {
+              firstMessage = await ctx.replyWithVideo(item.url, {
+                caption: message,
+                parse_mode: 'HTML',
+                disable_notification: true
+              });
+            }
           }
         }
         
