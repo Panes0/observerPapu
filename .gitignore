@@ -144,7 +144,7 @@ temp_downloads/
 
 .image-cache/
 *.image-cache/
-
+.image-cache/image-cache.json
 .claude/
 --sleep-interval
 logs/
