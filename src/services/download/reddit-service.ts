@@ -406,8 +406,8 @@ export class RedditService {
         .on('error', (err: Error) => reject(err));
 
       // Hide terminal window on Windows
-      // @ts-ignore - _spawnOptions is not in the type definitions but exists
       if (process.platform === 'win32') {
+        // @ts-ignore - _spawnOptions is not in the type definitions but exists
         command._spawnOptions = { windowsHide: true };
       }
 

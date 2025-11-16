@@ -28,7 +28,13 @@
       "Bash(pm2 restart:*)",
       "Bash(timeout 3 pm2 logs:*)",
       "Bash(curl:*)",
-      "Bash(\"..\\node_modules\\youtube-dl-exec\\bin\\yt-dlp.exe\" \"https://www.reddit.com/r/TikTokCringe/comments/1ownxfs/man_desperately_swiping_right_while_waiting_for/\" --list-formats)"
+      "Bash(\"..\\node_modules\\youtube-dl-exec\\bin\\yt-dlp.exe\" \"https://www.reddit.com/r/TikTokCringe/comments/1ownxfs/man_desperately_swiping_right_while_waiting_for/\" --list-formats)",
+      "Bash(npm install:*)",
+      "Bash(pm2-windows-startup install:*)",
+      "Bash(npx pm2-windows-startup install)",
+      "Bash(pm2 save:*)",
+      "Bash(pm2 flush:*)",
+      "Bash(timeout 5 pm2 logs:*)"
     ],
     "deny": [],
     "additionalDirectories": [
