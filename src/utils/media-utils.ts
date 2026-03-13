@@ -205,4 +205,18 @@ export function isTwitterUrl(url: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Checks if a URL is from TikTok CDN
+ */
+export function isTikTokUrl(url: string): boolean {
+  try {
+    const urlObj = new URL(url);
+    return urlObj.hostname.includes('tiktok.com') ||
+           urlObj.hostname.includes('tiktokcdn.com') ||
+           urlObj.hostname.includes('tiktokv.com');
+  } catch {
+    return false;
+  }
 } 

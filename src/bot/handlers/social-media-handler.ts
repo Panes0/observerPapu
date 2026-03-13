@@ -1,7 +1,7 @@
 import { Context, InputFile } from 'grammy';
 import { SocialMediaManager } from '../../services/social-media';
 import { extractUrls, isSocialMediaUrl, isProcessableUrl, getDomain, isYouTubeLivestream } from '../../utils/url-utils';
-import { formatPostForTelegram, formatErrorMessage, getMainMediaType, downloadMedia, isTwitterUrl } from '../../utils/media-utils';
+import { formatPostForTelegram, formatErrorMessage, getMainMediaType, downloadMedia, isTwitterUrl, isTikTokUrl } from '../../utils/media-utils';
 import { SocialMediaPost } from '../../types/social-media';
 // Removed old social-media-config imports - now using main bot config
 import { getDownloadService } from '../../services/download';
@@ -432,11 +432,12 @@ export class SocialMediaHandler {
           disable_notification: true // Silent reply
         });
       } else if (mediaType === 'video') {
-        // Check if this is a Twitter video that needs to be downloaded first
-        if (isTwitterUrl(mainMedia.url)) {
+        // Check if this is a Twitter or TikTok video that needs to be downloaded first
+        if (isTwitterUrl(mainMedia.url) || isTikTokUrl(mainMedia.url)) {
           try {
-            console.log(`📥 Downloading Twitter video: ${mainMedia.url}`);
-            const tempPath = `temp_downloads/twitter_${Date.now()}_${Math.random().toString(36).substring(7)}.mp4`;
+            const platform = isTwitterUrl(mainMedia.url) ? 'Twitter' : 'TikTok';
+            console.log(`📥 Downloading ${platform} video: ${mainMedia.url}`);
+            const tempPath = `temp_downloads/${platform.toLowerCase()}_${Date.now()}_${Math.random().toString(36).substring(7)}.mp4`;
             const downloadedPath = await downloadMedia(mainMedia.url, tempPath);
 
             // Send the downloaded file
@@ -454,7 +455,7 @@ export class SocialMediaHandler {
               console.error('Error cleaning up file:', cleanupError);
             }
           } catch (downloadError) {
-            console.error('Error downloading Twitter video, trying direct URL:', downloadError);
+            console.error(`Error downloading ${isTwitterUrl(mainMedia.url) ? 'Twitter' : 'TikTok'} video, trying direct URL:`, downloadError);
             // Fallback to direct URL if download fails
             sentMessage = await ctx.replyWithVideo(mainMedia.url, {
               caption: message,
@@ -463,7 +464,7 @@ export class SocialMediaHandler {
             });
           }
         } else {
-          // For non-Twitter videos, try direct URL first
+          // For other videos, try direct URL first
           sentMessage = await ctx.replyWithVideo(mainMedia.url, {
             caption: message,
             parse_mode: 'HTML',
@@ -521,16 +522,17 @@ export class SocialMediaHandler {
           const item = compatibleMedia[i];
           let mediaSource: string | InputFile = item.url;
 
-          // Download Twitter videos first
-          if (item.type === 'video' && isTwitterUrl(item.url)) {
+          // Download Twitter or TikTok videos first
+          if (item.type === 'video' && (isTwitterUrl(item.url) || isTikTokUrl(item.url))) {
             try {
-              console.log(`📥 Downloading Twitter video for media group: ${item.url}`);
-              const tempPath = `temp_downloads/twitter_mg_${Date.now()}_${i}_${Math.random().toString(36).substring(7)}.mp4`;
+              const platform = isTwitterUrl(item.url) ? 'Twitter' : 'TikTok';
+              console.log(`📥 Downloading ${platform} video for media group: ${item.url}`);
+              const tempPath = `temp_downloads/${platform.toLowerCase()}_mg_${Date.now()}_${i}_${Math.random().toString(36).substring(7)}.mp4`;
               const downloadedPath = await downloadMedia(item.url, tempPath);
               mediaSource = new InputFile(downloadedPath);
               downloadedFiles.push(downloadedPath);
             } catch (downloadError) {
-              console.error('Error downloading Twitter video in media group:', downloadError);
+              console.error(`Error downloading ${isTwitterUrl(item.url) ? 'Twitter' : 'TikTok'} video in media group:`, downloadError);
               // Fallback to URL if download fails
             }
           }
@@ -588,11 +590,12 @@ export class SocialMediaHandler {
               disable_notification: true
             });
           } else if (item.type === 'video') {
-            // Download Twitter videos first
-            if (isTwitterUrl(item.url)) {
+            // Download Twitter or TikTok videos first
+            if (isTwitterUrl(item.url) || isTikTokUrl(item.url)) {
               try {
-                console.log(`📥 Downloading Twitter video: ${item.url}`);
-                const tempPath = `temp_downloads/twitter_single_${Date.now()}_${Math.random().toString(36).substring(7)}.mp4`;
+                const platform = isTwitterUrl(item.url) ? 'Twitter' : 'TikTok';
+                console.log(`📥 Downloading ${platform} video: ${item.url}`);
+                const tempPath = `temp_downloads/${platform.toLowerCase()}_single_${Date.now()}_${Math.random().toString(36).substring(7)}.mp4`;
                 const downloadedPath = await downloadMedia(item.url, tempPath);
 
                 firstMessage = await ctx.replyWithVideo(new InputFile(downloadedPath), {
@@ -609,7 +612,7 @@ export class SocialMediaHandler {
                   console.error('Error cleaning up file:', cleanupError);
                 }
               } catch (downloadError) {
-                console.error('Error downloading Twitter video:', downloadError);
+                console.error(`Error downloading ${isTwitterUrl(item.url) ? 'Twitter' : 'TikTok'} video:`, downloadError);
                 // Fallback to URL
                 firstMessage = await ctx.replyWithVideo(item.url, {
                   caption: message,

@@ -24,7 +24,20 @@ export class TikTokService extends BaseSocialMediaService {
   }
 
   async extractPost(url: string): Promise<SocialMediaPost> {
-    const videoId = this.extractVideoId(url);
+    // Resolve short URLs first (vm.tiktok.com, vt.tiktok.com)
+    let resolvedUrl = url;
+    if (url.includes('vm.tiktok.com') || url.includes('vt.tiktok.com')) {
+      console.log(`🔗 Resolving TikTok short URL: ${url}`);
+      try {
+        resolvedUrl = await this.resolveShortUrl(url);
+        console.log(`✅ Resolved to: ${resolvedUrl}`);
+      } catch (error) {
+        console.log(`⚠️ Could not resolve short URL, trying with original: ${error}`);
+        // Continue with original URL if resolution fails
+      }
+    }
+
+    const videoId = this.extractVideoId(resolvedUrl);
     let lastError: Error | null = null;
 
     console.log(`🔍 Extracting TikTok post for video ID: ${videoId}`);
@@ -32,20 +45,20 @@ export class TikTokService extends BaseSocialMediaService {
     // Try multiple APIs
     for (let apiIndex = 0; apiIndex < this.fallbackApis.length; apiIndex++) {
       const apiUrl = this.fallbackApis[apiIndex];
-      
+
       try {
         console.log(`🔄 Trying TikTok API ${apiIndex + 1}/${this.fallbackApis.length}: ${apiUrl}`);
-        
+
         if (apiUrl.includes('vxtiktok.com')) {
           const result = await this.extractWithVxTikTok(videoId, apiUrl);
           console.log(`✅ Successfully extracted using VxTikTok API`);
           return result;
         } else if (apiUrl.includes('tikwm.com')) {
-          const result = await this.extractWithTikwm(url, apiUrl);
+          const result = await this.extractWithTikwm(resolvedUrl, apiUrl);
           console.log(`✅ Successfully extracted using TikWM API`);
           return result;
         } else if (apiUrl.includes('snapinsta.app')) {
-          const result = await this.extractWithSnapinsta(url, apiUrl);
+          const result = await this.extractWithSnapinsta(resolvedUrl, apiUrl);
           console.log(`✅ Successfully extracted using Snapinsta API`);
           return result;
         }
@@ -59,7 +72,7 @@ export class TikTokService extends BaseSocialMediaService {
     // If all APIs fail, try alternative method
     try {
       console.log(`🔄 All APIs failed, trying alternative method...`);
-      const result = await this.extractWithAlternativeMethod(url);
+      const result = await this.extractWithAlternativeMethod(resolvedUrl);
       console.log(`✅ Successfully extracted using alternative method`);
       return result;
     } catch (error) {
@@ -257,13 +270,37 @@ export class TikTokService extends BaseSocialMediaService {
     return `https://www.tiktok.com/@user/video/${videoId}`;
   }
 
+  private async resolveShortUrl(shortUrl: string): Promise<string> {
+    try {
+      // Use fetch with redirect: 'follow' to get the final URL
+      const response = await fetch(shortUrl, {
+        method: 'HEAD',
+        redirect: 'follow',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+      });
+
+      // The final URL after redirects
+      const finalUrl = response.url;
+
+      if (finalUrl && finalUrl !== shortUrl) {
+        return finalUrl;
+      }
+
+      throw new Error('No redirect found');
+    } catch (error) {
+      console.error('Error resolving short URL:', error);
+      throw error;
+    }
+  }
+
   private extractVideoId(url: string): string {
-    // Extraer ID del video de TikTok
+    // Extraer ID del video de TikTok (only from full URLs, not short URLs)
     const patterns = [
       /tiktok\.com\/@[\w.-]+\/video\/(\d+)/,
       /tiktok\.com\/v\/(\d+)/,
-      /vm\.tiktok\.com\/([A-Za-z0-9]+)/,
-      /vt\.tiktok\.com\/([A-Za-z0-9]+)/
+      // Note: vm.tiktok.com and vt.tiktok.com URLs should be resolved first
     ];
 
     for (const pattern of patterns) {

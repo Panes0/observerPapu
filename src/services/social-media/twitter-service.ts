@@ -26,14 +26,37 @@ export class TwitterService extends BaseSocialMediaService {
       // Extraer media del tweet principal
       let allMedia = this.extractMedia(data.tweet);
       let originalPost: SocialMediaPost | undefined;
-      
+
+      // 🆕 Extraer media de tweets citados (quote tweets)
+      if (data.tweet.quote) {
+        const quotedTweet = data.tweet.quote;
+        const quotedMedia = this.extractMedia(quotedTweet);
+
+        // Agregar la media del tweet citado al array principal
+        allMedia = [...allMedia, ...quotedMedia];
+
+        // Crear objeto para el tweet citado
+        originalPost = {
+          id: quotedTweet.id,
+          platform: 'twitter',
+          url: quotedTweet.url || `https://twitter.com/i/status/${quotedTweet.id}`,
+          author: quotedTweet.author?.name || quotedTweet.author?.screen_name || 'Unknown',
+          content: quotedTweet.text || quotedTweet.raw_text?.text || '',
+          media: quotedMedia,
+          timestamp: new Date(quotedTweet.created_at || quotedTweet.created_timestamp * 1000),
+          likes: quotedTweet.likes,
+          shares: quotedTweet.retweets,
+          comments: quotedTweet.replies
+        };
+      }
+
       // Si hay tweets referenciados (respuestas, retweets, etc.) y están incluidos en la respuesta
       if (data.includes?.tweets) {
         for (const referencedTweet of data.includes.tweets) {
           const referencedMedia = this.extractMedia(referencedTweet);
           // Agregar la media del tweet referenciado al array principal
           allMedia = [...allMedia, ...referencedMedia];
-          
+
           // Si este es el tweet original (primera respuesta o tweet padre), crear el objeto original
           if (!originalPost) {
             originalPost = {
