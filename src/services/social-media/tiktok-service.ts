@@ -3,9 +3,9 @@ import { SocialMediaPost, MediaItem } from '../../types/social-media';
 
 export class TikTokService extends BaseSocialMediaService {
   private fallbackApis = [
+    'https://vxtiktok.com',
     'https://tikwm.com',
-    'https://snapinsta.app',    
-    'https://vxtiktok.com'
+    'https://snapinsta.app'
   ];
   
   private currentApiIndex = 0;

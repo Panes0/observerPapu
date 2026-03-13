@@ -215,6 +215,7 @@ export function isTikTokUrl(url: string): boolean {
     const urlObj = new URL(url);
     return urlObj.hostname.includes('tiktok.com') ||
            urlObj.hostname.includes('tiktokcdn.com') ||
+           urlObj.hostname.includes('tiktokcdn-us.com') ||
            urlObj.hostname.includes('tiktokv.com');
   } catch {
     return false;
