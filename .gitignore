@@ -150,3 +150,7 @@ temp_downloads/
 logs/
 
 RunScript.bat
+
+# YouTube cookies file (contains sensitive session data)
+cookies.txt
+*.cookies.txt

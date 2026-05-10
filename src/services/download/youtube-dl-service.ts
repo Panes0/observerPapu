@@ -101,13 +101,16 @@ export class YouTubeDLService {
     try {
       console.log(`🔍 Extracting info for: ${url}`);
       
+      const isYouTube = url.includes('youtube.com') || url.includes('youtu.be');
+
       // Enhanced options with Instagram-specific handling
       let options: any = {
         dumpJson: true,
         skipDownload: true,
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         referer: 'https://www.youtube.com/',
-        addHeader: ['Accept-Language:en-US,en;q=0.9']
+        addHeader: ['Accept-Language:en-US,en;q=0.9'],
+        ...(isYouTube && this.config.cookiesFile ? { cookies: this.config.cookiesFile } : {})
       };
 
       // Instagram-specific options
@@ -219,14 +222,14 @@ export class YouTubeDLService {
       if (url.includes('youtube.com') || url.includes('youtu.be')) {
         console.log(`🔄 Trying YouTube fallback approach...`);
         try {
-          const fallbackOptions = {
+          const fallbackOptions: any = {
             dumpJson: true,
             skipDownload: true,
             format: 'best[height<=720]',
             userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             noCheckCertificate: true,
-            preferFreeFormats: true
-            // Removed verbose: true to avoid potential flag issues
+            preferFreeFormats: true,
+            ...(this.config.cookiesFile ? { cookies: this.config.cookiesFile } : {})
           };
 
           const fallbackResult = await youtubeDl(url, fallbackOptions, {
@@ -301,11 +304,14 @@ export class YouTubeDLService {
       const outputPath = this.fileManager.getTempPath(fileName);
       const outputTemplate = this.fileManager.getTempPath(`${Date.now()}_%(title)s.%(ext)s`);
 
+      const isYouTubeDownload = url.includes('youtube.com') || url.includes('youtu.be');
+
       // Prepare download options
       const downloadOptions: any = {
         output: outputTemplate,
         format: this.buildFormatSelector(info),
-        writeInfoJson: true
+        writeInfoJson: true,
+        ...(isYouTubeDownload && this.config.cookiesFile ? { cookies: this.config.cookiesFile } : {})
         // Remove problematic flags that cause --no-* issues
         // writeThumbnail: this.config.extractThumbnails,  // Skip to avoid --no-write-thumbnail
         // writeSubtitles: this.config.extractSubtitles,   // Skip to avoid --no-write-subtitles

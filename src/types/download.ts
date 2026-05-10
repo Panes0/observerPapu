@@ -83,6 +83,7 @@ export interface DownloadConfig {
   showProgress: boolean;
   showExtractorName: boolean;
   showLivestreamMessages: boolean;
+  cookiesFile?: string;
 }
 
 export interface FileInfo {
