@@ -1,9 +1,13 @@
 import youtubeDl from 'youtube-dl-exec';
 import * as path from 'path';
 import * as fs from 'fs';
+import { promisify } from 'util';
+import { pipeline } from 'stream';
 import { DownloadInfo, DownloadResult, DownloadConfig } from '../../types/download';
 import { FileManager } from './file-manager';
 import { RedditService } from './reddit-service';
+
+const streamPipeline = promisify(pipeline);
 
 export class YouTubeDLService {
   private fileManager: FileManager;
@@ -102,6 +106,7 @@ export class YouTubeDLService {
       console.log(`🔍 Extracting info for: ${url}`);
       
       const isYouTube = url.includes('youtube.com') || url.includes('youtu.be');
+      const isTwitter = url.includes('twitter.com') || url.includes('x.com') || url.includes('t.co');
 
       // Enhanced options with Instagram-specific handling
       let options: any = {
@@ -110,8 +115,22 @@ export class YouTubeDLService {
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         referer: 'https://www.youtube.com/',
         addHeader: ['Accept-Language:en-US,en;q=0.9'],
-        ...(isYouTube && this.config.cookiesFile ? { cookies: this.config.cookiesFile } : {})
+        ...((isYouTube || isTwitter) && this.config.cookiesFile ? { cookies: this.config.cookiesFile } : {})
       };
+
+      // Twitter-specific options
+      if (isTwitter) {
+        options = {
+          ...options,
+          referer: 'https://x.com/',
+          userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          addHeader: [
+            'Accept-Language:en-US,en;q=0.9',
+            'Accept:text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Origin:https://x.com'
+          ]
+        };
+      }
 
       // Instagram-specific options
       if (url.includes('instagram.com')) {
@@ -305,20 +324,25 @@ export class YouTubeDLService {
       const outputTemplate = this.fileManager.getTempPath(`${Date.now()}_%(title)s.%(ext)s`);
 
       const isYouTubeDownload = url.includes('youtube.com') || url.includes('youtu.be');
+      const isTwitterDownload = url.includes('twitter.com') || url.includes('x.com') || url.includes('t.co');
 
       // Prepare download options
       const downloadOptions: any = {
         output: outputTemplate,
         format: this.buildFormatSelector(info),
         writeInfoJson: true,
-        ...(isYouTubeDownload && this.config.cookiesFile ? { cookies: this.config.cookiesFile } : {})
-        // Remove problematic flags that cause --no-* issues
-        // writeThumbnail: this.config.extractThumbnails,  // Skip to avoid --no-write-thumbnail
-        // writeSubtitles: this.config.extractSubtitles,   // Skip to avoid --no-write-subtitles
-        // quiet: !this.config.showProgress,              // Skip to avoid --no-quiet issues
-        // noWarnings: true,                              // Skip to avoid --no-warnings issues
-        // extractFlat: false                             // Skip to avoid --no-extract-flat
+        ...((isYouTubeDownload || isTwitterDownload) && this.config.cookiesFile ? { cookies: this.config.cookiesFile } : {})
       };
+
+      // Twitter-specific download headers
+      if (isTwitterDownload) {
+        downloadOptions.referer = 'https://x.com/';
+        downloadOptions.addHeader = [
+          'Accept-Language:en-US,en;q=0.9',
+          'Accept:text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+          'Origin:https://x.com'
+        ];
+      }
 
       // Handle playlists
       if (info._type === 'playlist') {
@@ -421,8 +445,9 @@ export class YouTubeDLService {
       return `${this.config.audioQuality}[filesize<${maxSize}M]/best[filesize<${maxSize}M]/best`;
     }
 
-    // For Reddit content - use universal format selector
-    if (info.extractor && info.extractor.toLowerCase() === 'reddit') {
+    // For Twitter/Reddit - use universal format selector (YouTube format IDs don't apply)
+    const extractor = (info.extractor || '').toLowerCase();
+    if (extractor === 'twitter' || extractor === 'reddit') {
       return 'bestvideo[height<=720]+bestaudio/best[height<=720]/bestvideo+bestaudio/best';
     }
 
@@ -542,13 +567,67 @@ export class YouTubeDLService {
    */
   async performMaintenance(): Promise<void> {
     console.log('🧹 Performing download service maintenance...');
-    
+
     // Clean up old files
     await this.fileManager.cleanupOldFiles(1);
-    
+
     // Refresh supported sites list
     await this.getSupportedSites();
-    
+
     console.log('✅ Maintenance completed');
+  }
+
+  /**
+   * Downloads a Twitter/X video directly from a twimg CDN URL using bearer token auth.
+   * Bypasses yt-dlp which reliably fails with 403 on Twitter m3u8 streams.
+   */
+  async downloadTwitterDirect(cdnUrl: string): Promise<DownloadResult> {
+    console.log(`🐦 Downloading Twitter video directly: ${cdnUrl}`);
+
+    const ext = cdnUrl.split('?')[0].split('.').pop() || 'mp4';
+    const fileName = `${Date.now()}_twitter_video.${ext}`;
+    const filePath = this.fileManager.getTempPath(fileName);
+
+    try {
+      const response = await fetch(cdnUrl, {
+        headers: {
+          'Authorization': 'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA',
+          'Referer': 'https://twitter.com/',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'x-twitter-client-language': 'en',
+          'Accept': '*/*',
+          'Accept-Language': 'en-US,en;q=0.9'
+        }
+      });
+
+      if (!response.ok) {
+        return { success: false, error: `HTTP ${response.status} fetching Twitter CDN URL` };
+      }
+
+      if (!response.body) {
+        return { success: false, error: 'Empty response body from Twitter CDN' };
+      }
+
+      const fileStream = fs.createWriteStream(filePath);
+      await streamPipeline(response.body as any, fileStream);
+
+      const fileInfo = await this.fileManager.validateFile(filePath);
+      console.log(`✅ Twitter direct download completed: ${fileInfo.path} (${FileManager.formatFileSize(fileInfo.size)})`);
+
+      return {
+        success: true,
+        filePath: fileInfo.path,
+        fileName: path.basename(fileInfo.path),
+        fileSize: fileInfo.size,
+        extractor: 'twitter'
+      };
+    } catch (error) {
+      try { fs.unlinkSync(filePath); } catch {}
+      console.error(`❌ Twitter direct download failed:`, error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Twitter direct download failed'
+      };
+    }
   }
 } 

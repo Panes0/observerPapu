@@ -436,13 +436,20 @@ export class SocialMediaHandler {
         if (isTwitterUrl(mainMedia.url) || isTikTokUrl(mainMedia.url)) {
           try {
             const platform = isTwitterUrl(mainMedia.url) ? 'Twitter' : 'TikTok';
-            // Use yt-dlp with the original post URL — Twitter CDN URLs return 403 to plain fetch
-            const downloadUrl = originalUrl || mainMedia.url;
-            console.log(`📥 Downloading ${platform} video via yt-dlp: ${downloadUrl}`);
             const downloadService = getDownloadService();
-            const dlResult = await downloadService.downloadMedia(downloadUrl);
+            let dlResult;
+            if (isTwitterUrl(mainMedia.url)) {
+              // Twitter CDN URLs work with direct HTTP + bearer token; yt-dlp reliably 403s on m3u8
+              console.log(`📥 Downloading Twitter video directly from CDN: ${mainMedia.url}`);
+              dlResult = await downloadService.downloadTwitterDirect(mainMedia.url);
+            } else {
+              // TikTok: use yt-dlp with the original post URL
+              const downloadUrl = originalUrl || mainMedia.url;
+              console.log(`📥 Downloading ${platform} video via yt-dlp: ${downloadUrl}`);
+              dlResult = await downloadService.downloadMedia(downloadUrl);
+            }
             if (!dlResult.success || !dlResult.filePath) {
-              throw new Error(dlResult.error || 'yt-dlp download failed');
+              throw new Error(dlResult.error || 'Download failed');
             }
             const downloadedPath = dlResult.filePath;
 
