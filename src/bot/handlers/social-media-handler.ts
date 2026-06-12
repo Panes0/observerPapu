@@ -440,23 +440,55 @@ export class SocialMediaHandler {
             const tempPath = `temp_downloads/${platform.toLowerCase()}_${Date.now()}_${Math.random().toString(36).substring(7)}.mp4`;
             const downloadedPath = await downloadMedia(mainMedia.url, tempPath);
 
-            // Send the downloaded file
-            sentMessage = await ctx.replyWithVideo(new InputFile(downloadedPath), {
+            // Optimize video for Telegram (compress if needed to stay under 50MB limit)
+            let finalPath = downloadedPath;
+            if (botConfig.options.videoProcessing?.enabled) {
+              try {
+                const fileSize = fs.statSync(downloadedPath).size;
+                const shouldOptimize = !botConfig.options.videoProcessing.skipOptimizationForSmallFiles ||
+                                       fileSize > 5 * 1024 * 1024;
+                if (shouldOptimize) {
+                  const videoOptimizer = getVideoOptimizer(botConfig.options.downloadFallback.tempDir);
+                  const result = await videoOptimizer.optimizeVideo(downloadedPath, {
+                    faststart: botConfig.options.videoProcessing.faststart,
+                    reencode: botConfig.options.videoProcessing.reencodeVideos,
+                    crf: botConfig.options.videoProcessing.compressionLevel,
+                    maxResolution: botConfig.options.videoProcessing.maxResolution,
+                    maxDuration: botConfig.options.videoProcessing.maxDuration,
+                    maxFileSize: botConfig.options.videoProcessing.maxFileSize
+                  });
+                  if (result.success && result.optimizedPath) {
+                    finalPath = result.optimizedPath;
+                    if (result.wasOptimized) {
+                      console.log(`📹 ${platform} video optimized for Telegram compatibility`);
+                    }
+                  }
+                }
+              } catch (optError) {
+                console.error('Error optimizing video, using original:', optError);
+              }
+            }
+
+            // Send the downloaded (and possibly optimized) file
+            sentMessage = await ctx.replyWithVideo(new InputFile(finalPath), {
               caption: message,
               parse_mode: 'HTML',
               disable_notification: true // Silent reply
             });
 
-            // Clean up the downloaded file
+            // Clean up downloaded and optimized files
             try {
               fs.unlinkSync(downloadedPath);
+              if (finalPath !== downloadedPath) {
+                fs.unlinkSync(finalPath);
+              }
               console.log(`🗑️ Cleaned up downloaded file: ${downloadedPath}`);
             } catch (cleanupError) {
               console.error('Error cleaning up file:', cleanupError);
             }
           } catch (downloadError) {
-            console.error(`Error downloading ${isTwitterUrl(mainMedia.url) ? 'Twitter' : 'TikTok'} video, trying direct URL:`, downloadError);
-            // Fallback to direct URL if download fails
+            console.error(`Error downloading ${isTwitterUrl(mainMedia.url) ? 'Twitter' : 'TikTok'} video (${mainMedia.url}):`, downloadError);
+            // Fallback to direct URL if download/optimization fails
             sentMessage = await ctx.replyWithVideo(mainMedia.url, {
               caption: message,
               parse_mode: 'HTML',
@@ -480,10 +512,11 @@ export class SocialMediaHandler {
       }
       return sentMessage;
     } catch (error) {
-      console.error('Error sending media:', error);
+      const errMsg = error instanceof Error ? error.message : String(error);
+      console.error(`Error sending media (${post.media?.[0]?.url}): ${errMsg}`);
       // Fallback a mensaje de texto si falla el envío de medios
       try {
-        const sentMessage = await ctx.reply(message, { 
+        const sentMessage = await ctx.reply(message, {
           parse_mode: 'HTML',
           disable_notification: true // Silent reply
         });
