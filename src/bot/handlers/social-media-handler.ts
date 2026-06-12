@@ -136,7 +136,7 @@ export class SocialMediaHandler {
       formattedMessage = addUserAttribution(formattedMessage, ctx);
       
       // Enviar contenido según el tipo de medio
-      sentMessage = await this.sendPostContent(ctx, post, formattedMessage);
+      sentMessage = await this.sendPostContent(ctx, post, formattedMessage, url);
       
       // **PASO 3: Guardar en caché si se envió correctamente**
       if (sentMessage && sentMessage.message_id && ctx.chat?.id) {
@@ -394,7 +394,7 @@ export class SocialMediaHandler {
   /**
    * Envía el contenido del post según su tipo
    */
-  private static async sendPostContent(ctx: Context, post: SocialMediaPost, message: string): Promise<any> {
+  private static async sendPostContent(ctx: Context, post: SocialMediaPost, message: string, originalUrl?: string): Promise<any> {
     const mediaType = getMainMediaType(post);
     
     if (!mediaType || !post.media || post.media.length === 0) {
@@ -436,9 +436,15 @@ export class SocialMediaHandler {
         if (isTwitterUrl(mainMedia.url) || isTikTokUrl(mainMedia.url)) {
           try {
             const platform = isTwitterUrl(mainMedia.url) ? 'Twitter' : 'TikTok';
-            console.log(`📥 Downloading ${platform} video: ${mainMedia.url}`);
-            const tempPath = `temp_downloads/${platform.toLowerCase()}_${Date.now()}_${Math.random().toString(36).substring(7)}.mp4`;
-            const downloadedPath = await downloadMedia(mainMedia.url, tempPath);
+            // Use yt-dlp with the original post URL — Twitter CDN URLs return 403 to plain fetch
+            const downloadUrl = originalUrl || mainMedia.url;
+            console.log(`📥 Downloading ${platform} video via yt-dlp: ${downloadUrl}`);
+            const downloadService = getDownloadService();
+            const dlResult = await downloadService.downloadMedia(downloadUrl);
+            if (!dlResult.success || !dlResult.filePath) {
+              throw new Error(dlResult.error || 'yt-dlp download failed');
+            }
+            const downloadedPath = dlResult.filePath;
 
             // Optimize video for Telegram (compress if needed to stay under 50MB limit)
             let finalPath = downloadedPath;
@@ -487,7 +493,8 @@ export class SocialMediaHandler {
               console.error('Error cleaning up file:', cleanupError);
             }
           } catch (downloadError) {
-            console.error(`Error downloading ${isTwitterUrl(mainMedia.url) ? 'Twitter' : 'TikTok'} video (${mainMedia.url}):`, downloadError);
+            const dlErrMsg = downloadError instanceof Error ? downloadError.message : String(downloadError);
+            console.error(`Error downloading ${isTwitterUrl(mainMedia.url) ? 'Twitter' : 'TikTok'} video: ${dlErrMsg}`);
             // Fallback to direct URL if download/optimization fails
             sentMessage = await ctx.replyWithVideo(mainMedia.url, {
               caption: message,
